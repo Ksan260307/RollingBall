@@ -7,7 +7,18 @@
  * rather than break the game.
  */
 
-import { SHAPE_CELLS, defaultShape, shapeFromText, shapeToText } from '../core/ballShape';
+import {
+  SHAPE_CELLS,
+  defaultShape,
+  shapeFromText,
+  shapeTextCells,
+  shapeToText,
+  upscaleShape,
+} from '../core/ballShape';
+
+/** How many cube slots a design saved before the cubes were made finer had. */
+const OLD_SHAPE_SIZE = 9;
+const OLD_SHAPE_CELLS = OLD_SHAPE_SIZE * OLD_SHAPE_SIZE * OLD_SHAPE_SIZE;
 
 const RECORDS_KEY = 'rollingball.records.v1';
 const BALL_KEY = 'rollingball.ball.v1';
@@ -92,7 +103,7 @@ export function loadBall(): BallDesign {
       photoStrength?: number;
       shine?: number;
     };
-    const voxels = parsed.shape ? shapeFromText(parsed.shape) : defaultShape();
+    const voxels = parsed.shape ? readShape(parsed.shape) : defaultShape();
     if (voxels.length !== SHAPE_CELLS) return defaultBall();
     let used = 0;
     for (let i = 0; i < voxels.length; i++) if (voxels[i] !== 0) used++;
@@ -118,6 +129,17 @@ export function saveBall(design: BallDesign): void {
       shine: design.shine,
     }),
   );
+}
+
+/**
+ * Reads a saved design, bringing one built with the old, coarser cubes up to
+ * the finer ones so that nobody loses the ball they made.
+ */
+function readShape(text: string): Uint8Array {
+  if (shapeTextCells(text) === OLD_SHAPE_CELLS) {
+    return upscaleShape(shapeFromText(text, OLD_SHAPE_CELLS), OLD_SHAPE_SIZE);
+  }
+  return shapeFromText(text);
 }
 
 function clampUnit(value: unknown, fallback: number): number {

@@ -96,14 +96,19 @@ describe('rolling downhill', () => {
     expect(Math.abs(toNumber(world.sideways[0]))).toBeLessThan(4.1);
   });
 
-  it('falls off a ledge that has no walls', () => {
+  it('goes back to the start after falling off a ledge with no walls', () => {
     const world = makeWorld(narrowLedge);
     let steps = 0;
-    while (world.state[0] === RunState.Rolling && steps < STEPS_PER_SECOND * 30) {
+    while (world.falls[0] === 0 && steps < STEPS_PER_SECOND * 30) {
       world.advance([packControls({ steer: ONE, push: 0, buttons: 0 })]);
       steps++;
     }
-    expect(world.state[0]).toBe(RunState.Fallen);
+    expect(world.falls[0]).toBe(1);
+    // Back at the start, still going, with the clock never having stopped.
+    expect(world.state[0]).toBe(RunState.Rolling);
+    expect(world.travelled[0]).toBeLessThan(Math.round(4 * ONE));
+    expect(world.speedFor(0)).toBe(0);
+    expect(world.elapsedSteps[0]).toBe(steps);
   });
 
   it('finishes when it reaches the end', () => {

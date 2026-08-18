@@ -16,6 +16,7 @@ import {
   cubeShape,
   defaultShape,
   measureShape,
+  pebbleShape,
 } from '../src/core/ballShape';
 import { packControls } from '../src/core/input';
 import { crossInto, dot, magnitude, triple } from '../src/core/rolling';
@@ -176,10 +177,17 @@ describe('the floor stops where it is drawn', () => {
     world.y[0] = course.startY - mul(course.forwardY[0], back);
     world.z[0] = course.startZ - mul(course.forwardZ[0], back);
 
-    roll(world, STEPS_PER_SECOND * 6);
-    // It must drop, not roll away on a surface that is not there.
-    expect(world.grounded[0]).toBe(0);
-    expect(world.state[0]).toBe(RunState.Fallen);
+    let steps = 0;
+    while (world.falls[0] === 0 && steps < STEPS_PER_SECOND * 10) {
+      world.advance([NEUTRAL]);
+      steps++;
+    }
+    // It drops rather than rolling away on a surface that is not there, and
+    // dropping puts it straight back on the start line.
+    expect(world.falls[0]).toBe(1);
+    expect(world.state[0]).toBe(RunState.Rolling);
+    expect(toNumber(world.travelled[0])).toBeLessThan(4);
+    expect(world.speedFor(0)).toBe(0);
   });
 
   it('knows the floor has run out at either end', () => {
@@ -392,8 +400,8 @@ describe('what the ball is made of matters', () => {
   });
 
   it('lets a heavier ball push through the air better', () => {
-    const heavy = ballFeelFrom(measureShape(cubeShape()));
-    const light = ballFeelFrom(measureShape(defaultShape()));
+    const heavy = ballFeelFrom(measureShape(defaultShape()));
+    const light = ballFeelFrom(measureShape(pebbleShape()));
     expect(heavy.weight).toBeGreaterThan(light.weight);
   });
 });

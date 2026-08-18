@@ -73,7 +73,15 @@ export class Screens {
       el(
         'div',
         { class: 'title-card' },
-        el('h1', { class: 'title', text: TEXT.title }),
+        // Two deliberate lines rather than one long one: the title is wider
+        // than a phone screen at any readable size, and left to itself it
+        // breaks in the middle of a word.
+        el(
+          'h1',
+          { class: 'title' },
+          el('span', { class: 'title-lead', text: TEXT.titleLead }),
+          el('span', { class: 'title-main', text: TEXT.titleMain }),
+        ),
         el('p', { class: 'tagline', text: TEXT.tagline }),
         el(
           'div',
@@ -81,7 +89,7 @@ export class Screens {
           button(TEXT.play, () => this.actions.onPlay(), 'primary'),
           button(TEXT.customise, () => this.actions.onCustomise()),
           button(TEXT.howTo, () => this.actions.onHowTo()),
-          button(TEXT.settings, () => this.actions.onSettings()),
+          button(TEXT.settings, () => this.actions.onSettings(), 'wide'),
         ),
       ),
     );
@@ -243,31 +251,25 @@ export class Screens {
     this.resultBody.append(
       el(
         'div',
-        { class: `panel panel-narrow ${summary.finished ? 'is-win' : 'is-lose'}` },
-        el(
-          'header',
-          { class: 'panel-head' },
-          el('h2', { text: summary.finished ? TEXT.finished : TEXT.fallen }),
-        ),
+        { class: 'panel panel-narrow is-win' },
+        el('header', { class: 'panel-head' }, el('h2', { text: TEXT.finished })),
         el(
           'div',
           { class: 'panel-body' },
-          summary.finished
-            ? el(
-                'div',
-                { class: 'result-time' },
-                el('span', { class: 'result-time-label', text: TEXT.yourTime }),
-                el('span', { class: 'result-time-value', text: formatTime(summary.seconds) }),
-              )
-            : el('p', { class: 'note', text: TEXT.fallenHint }),
+          el(
+            'div',
+            { class: 'result-time' },
+            el('span', { class: 'result-time-label', text: TEXT.yourTime }),
+            el('span', { class: 'result-time-value', text: formatTime(summary.seconds) }),
+          ),
           isBest ? el('p', { class: 'best-flag', text: TEXT.newRecord }) : null,
           el(
             'dl',
             { class: 'result-facts' },
-            el('dt', { text: TEXT.distance }),
-            el('dd', { text: `${summary.metres.toFixed(1)} m` }),
             el('dt', { text: TEXT.topSpeed }),
             el('dd', { text: formatSpeed(summary.topSpeed) }),
+            el('dt', { text: TEXT.falls }),
+            el('dd', { text: String(summary.falls) }),
             el('dt', { text: TEXT.collectedItems }),
             el('dd', { text: String(summary.collected) }),
             el('dt', { text: TEXT.bestTime }),
@@ -277,9 +279,7 @@ export class Screens {
             'div',
             { class: 'result-buttons' },
             button(TEXT.retry, () => this.actions.onRetry(), 'primary'),
-            summary.finished && hasNext
-              ? button(TEXT.nextStage, () => this.actions.onNextStage())
-              : null,
+            hasNext ? button(TEXT.nextStage, () => this.actions.onNextStage()) : null,
             button(TEXT.backToStages, () => this.actions.onBackToStages(), 'ghost'),
           ),
         ),

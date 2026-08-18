@@ -125,11 +125,18 @@ export class Session {
     this.previous.z = this.world.z[0];
   }
 
-  /** How the attempt ended, or null while it is still going. */
-  get outcome(): 'finished' | 'fallen' | null {
-    if (this.world.state[0] === RunState.Finished) return 'finished';
-    if (this.world.state[0] === RunState.Fallen) return 'fallen';
-    return null;
+  /**
+   * How the attempt ended, or null while it is still going. Going over the
+   * edge does not end it: the ball is put back on the start line and the
+   * clock keeps running.
+   */
+  get outcome(): 'finished' | null {
+    return this.world.state[0] === RunState.Finished ? 'finished' : null;
+  }
+
+  /** How many times the ball has gone over the edge this attempt. */
+  get falls(): number {
+    return this.world.falls[0];
   }
 
   /** A summary of the attempt, for the results screen. */
@@ -140,6 +147,7 @@ export class Session {
       metres: this.world.travelled[0] / ONE,
       topSpeed: this.world.topSpeed[0] / ONE,
       collected: this.world.collected[0],
+      falls: this.world.falls[0],
       finished: this.world.state[0] === RunState.Finished,
       checksum: this.world.checksum(),
     };
@@ -157,6 +165,8 @@ export interface RunSummary {
   metres: number;
   topSpeed: number;
   collected: number;
+  /** How many times the ball went over the edge and was put back. */
+  falls: number;
   finished: boolean;
   checksum: number;
 }

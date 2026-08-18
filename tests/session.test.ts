@@ -144,7 +144,7 @@ describe('replays', () => {
 });
 
 describe('a ball that misses the course', () => {
-  it('ends the attempt', () => {
+  it('is put back on the start line, with the clock still running', () => {
     const stage = STAGES[2];
     const session = new Session({
       stage,
@@ -152,10 +152,34 @@ describe('a ball that misses the course', () => {
       ball: measureShape(defaultShape()),
       countdownSeconds: 0,
     });
-    while (session.running) {
+    // Steering hard into the edge until it goes over.
+    let steps = 0;
+    while (session.falls === 0 && steps < 120 * 40) {
       session.update(STEP_SECONDS, { steer: ONE, push: 0, buttons: 0 });
+      steps++;
     }
-    expect(session.outcome).toBe('fallen');
-    expect(session.summary().finished).toBe(false);
+    expect(session.falls).toBe(1);
+    // The attempt carries on rather than ending.
+    expect(session.outcome).toBeNull();
+    expect(session.running).toBe(true);
+    expect(session.seconds).toBeGreaterThan(0);
+    expect(session.world.travelled[0]).toBeLessThan(Math.round(4 * ONE));
+  });
+
+  it('counts every fall, and reports them at the end', () => {
+    const stage = STAGES[0];
+    const session = new Session({
+      stage,
+      course: courseFor(stage),
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    while (session.running) {
+      session.update(STEP_SECONDS, unpackControls(demoControls(session.world, 0)));
+    }
+    const summary = session.summary();
+    expect(summary.finished).toBe(true);
+    expect(summary.falls).toBe(session.falls);
+    expect(summary.falls).toBeGreaterThanOrEqual(0);
   });
 });

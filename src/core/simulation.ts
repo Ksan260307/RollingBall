@@ -51,8 +51,6 @@ export const RunState = {
   Ready: 0,
   /** Under way. */
   Rolling: 1,
-  /** Off the course. */
-  Fallen: 2,
   /** Over the finish line. */
   Finished: 3,
 } as const;
@@ -101,8 +99,17 @@ const CONTACT_SLACK = Math.round(0.07 * ONE);
  */
 const CATCH_DEPTH = Math.round(1.6 * ONE);
 
-/** How far below the floor the ball has to drop before the run is over. */
+/** How far below the floor the ball has to drop before it is fetched back. */
 const FALL_LIMIT = Math.round(6.0 * ONE);
+
+/**
+ * How long the ball is held at the start after a fall, in steps.
+ *
+ * Falling does not end a run: the ball is put back at the start and carries
+ * on. The clock never stops, so the trip back up the hill is the whole cost
+ * of going over the edge.
+ */
+const RECOVERY_HOLD = Math.round(0.7 * STEPS_PER_SECOND);
 
 /** How much bounce is left after landing. */
 const LANDING_BOUNCE = Math.round(0.26 * ONE);
@@ -311,6 +318,10 @@ export class World {
   readonly finishStep: Int32Array;
   readonly collected: Int32Array;
   readonly elapsedSteps: Int32Array;
+  /** How many times the ball has gone over the edge and been fetched back. */
+  readonly falls: Int32Array;
+  /** Steps left of the pause after a fall, while the ball is put back. */
+  readonly recovering: Int32Array;
   private readonly hint: Int32Array;
 
   /** Things worth showing, refreshed every step. */
@@ -348,6 +359,8 @@ export class World {
     this.finishStep = new Int32Array(slots).fill(-1);
     this.collected = new Int32Array(slots);
     this.elapsedSteps = new Int32Array(slots);
+    this.falls = new Int32Array(slots);
+    this.recovering = new Int32Array(slots);
     this.hint = new Int32Array(slots);
 
     const along = Math.max(8, Math.min(96, Math.round(this.course.totalLength / ONE / 2)));
@@ -387,7 +400,38 @@ export class World {
       this.finishStep[p] = -1;
       this.collected[p] = 0;
       this.elapsedSteps[p] = 0;
+      this.falls[p] = 0;
+      this.recovering[p] = 0;
     }
+  }
+
+  /**
+   * Puts one ball back on the start line, still, and leaves everything else
+   * about the run alone: the clock, the lights collected, the scenery.
+   */
+  private returnToStart(player: number): void {
+    const c = this.course;
+    const offset =
+      this.players > 1 ? Math.round((player - (this.players - 1) / 2) * 1.6 * ONE) : 0;
+    const lift = this.feel.radius;
+    this.x[player] =
+      c.startX + mul(c.rightX[0], offset) + mul(c.upX[0], lift) + mul(c.forwardX[0], START_INSET);
+    this.y[player] =
+      c.startY + mul(c.rightY[0], offset) + mul(c.upY[0], lift) + mul(c.forwardY[0], START_INSET);
+    this.z[player] =
+      c.startZ + mul(c.rightZ[0], offset) + mul(c.upZ[0], lift) + mul(c.forwardZ[0], START_INSET);
+    this.velocityX[player] = 0;
+    this.velocityY[player] = 0;
+    this.velocityZ[player] = 0;
+    this.spinX[player] = 0;
+    this.spinY[player] = 0;
+    this.spinZ[player] = 0;
+    this.hint[player] = 0;
+    this.travelled[player] = 0;
+    this.sideways[player] = 0;
+    this.sidewaysSpeed[player] = 0;
+    this.aboveFloor[player] = 0;
+    this.grounded[player] = 1;
   }
 
   /**
@@ -547,7 +591,12 @@ export class World {
     } else {
       for (let p = 0; p < this.players; p++) {
         if (this.state[p] !== RunState.Rolling) continue;
+        // The clock runs through a recovery as well: that is what a fall costs.
         this.elapsedSteps[p]++;
+        if (this.recovering[p] > 0) {
+          this.recovering[p]--;
+          continue;
+        }
         this.moveBall(p, controls[p] ?? 0);
       }
     }
@@ -945,8 +994,12 @@ export class World {
         : 0;
 
     if (where.height < -FALL_LIMIT) {
-      this.state[player] = RunState.Fallen;
+      // Over the edge. Note where it happened for the picture, then put the
+      // ball back on the start line and let the run carry on.
       this.addMoment('fall', player, ONE);
+      this.falls[player]++;
+      this.returnToStart(player);
+      this.recovering[player] = RECOVERY_HOLD;
       return;
     }
 
@@ -1055,7 +1108,9 @@ export class World {
         .add(this.spinZ[p])
         .add(this.state[p])
         .add(this.elapsedSteps[p])
-        .add(this.collected[p]);
+        .add(this.collected[p])
+        .add(this.falls[p])
+        .add(this.recovering[p]);
     }
     this.scenery.checksum(sum);
     this.surroundings.checksum(sum);
@@ -1082,6 +1137,8 @@ export interface Snapshot {
   finishStep: Int32Array;
   collected: Int32Array;
   elapsedSteps: Int32Array;
+  falls: Int32Array;
+  recovering: Int32Array;
   scenery: EntityStore;
   surroundings: Surroundings;
   /** Which scenery groups were awake, and what their notes said. */
@@ -1112,6 +1169,8 @@ export function capture(world: World): Snapshot {
     finishStep: world.finishStep.slice(),
     collected: world.collected.slice(),
     elapsedSteps: world.elapsedSteps.slice(),
+    falls: world.falls.slice(),
+    recovering: world.recovering.slice(),
     scenery,
     surroundings,
     attention: world.saveAttention(),
@@ -1141,6 +1200,8 @@ export function rewind(world: World, snapshot: Snapshot): void {
   world.finishStep.set(snapshot.finishStep);
   world.collected.set(snapshot.collected);
   world.elapsedSteps.set(snapshot.elapsedSteps);
+  world.falls.set(snapshot.falls);
+  world.recovering.set(snapshot.recovering);
   snapshot.scenery.copyTo(world.scenery);
   snapshot.surroundings.copyTo(world.surroundings);
   world.loadAttention(snapshot.attention);

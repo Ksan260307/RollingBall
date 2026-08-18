@@ -190,7 +190,11 @@ export function buildBallGeometry(voxels: Uint8Array, scale = 1): BallGeometry {
             if (dir.vFlip) v = 1 - v;
             uvs.push(u, v);
           }
-          indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+          // Wound so the front of each triangle faces out of the ball. Get
+          // this backwards and the near side of the ball is culled away,
+          // leaving it looking see-through, and a tap aimed at the surface
+          // lands on the cube on the far side instead.
+          indices.push(base, base + 2, base + 1, base, base + 3, base + 2);
           const info: FaceInfo = { cell: cellIndex(x, y, z), x, y, z, nx, ny, nz };
           faces.push(info, info);
         }

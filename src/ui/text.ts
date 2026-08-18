@@ -15,6 +15,9 @@ export const ACTIVITY_WORDS = ['休憩中', '活動中'];
 
 export const TEXT = {
   title: 'ころがしタイムアタック',
+  /** The title split where it should break, so it never wraps awkwardly. */
+  titleLead: 'ころがし',
+  titleMain: 'タイムアタック',
   tagline: '高いところから ゴールまで、ころがして かけぬけよう。',
 
   play: 'あそぶ',
@@ -44,8 +47,9 @@ export const TEXT = {
   collectedItems: 'あつめた光',
 
   finished: 'ゴール！',
-  fallen: 'コースアウト',
-  fallenHint: 'ふちに気をつけて、まん中をねらってみよう。',
+  fellOff: 'おっと！',
+  fellOffHint: 'スタートから やりなおし。',
+  falls: '落ちた回数',
   newRecord: 'ベスト更新！',
   yourTime: 'タイム',
   topSpeed: '最高スピード',
@@ -57,13 +61,16 @@ export const TEXT = {
   howToBody: [
     '画面を ゆびで ドラッグ（PCはマウスで ドラッグ）すると、その向きに ボールが かたむきます。',
     '左右で ハンドル、上下で 加速と ブレーキ。キーボードの 矢印キーや WASD でも うごきます。',
-    'コースの ふちから 落ちると そこで おわり。まん中を ねらって、いきおいよく ゴールへ。',
+    'ふちから 落ちても おわりでは ありません。スタートに もどって やりなおしです。',
+    'ただし タイムは 止まりません。落ちないほうが ずっと 速く ゴールできます。',
     'ゆびを 2本ひらくと ズーム（PCは マウスホイール）。右下の ボタンでも かえられます。',
     'コースの外がわに 光が うかんでいます。ふちギリギリを 通ると ひろえます。タイムには ひびきません。',
   ],
 
   editorTitle: 'ボールをつくる',
-  editorHint: 'ブロックを タップして けずったり、ふやしたり。写真を はると もっと あなたらしく。',
+  editorHint: 'ブロックを なぞると、その まま つづけて けずったり ふやしたり できます。',
+  editorTarget: 'えらんでいる ところ',
+  undo: 'ひとつ もどす',
   toolAdd: 'ふやす',
   toolRemove: 'けずる',
   toolPaint: 'ぬる',
@@ -79,7 +86,7 @@ export const TEXT = {
   shine: 'つや',
   reset: 'さいしょから',
   save: 'できた',
-  rotateHint: 'なにもない ところを ドラッグすると まわせます。',
+  rotateHint: 'なにも ない ところを ドラッグ すると まわせます。ゆびを 2本ひらくと ズーム。',
 
   ballSize: '大きさ',
   ballWeight: 'おもさ',

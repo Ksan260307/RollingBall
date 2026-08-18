@@ -9,7 +9,7 @@
 import { ONE } from '../core/fixed';
 import { RunState, World } from '../core/simulation';
 import { Session } from '../game/session';
-import { el } from './dom';
+import { clear, el } from './dom';
 import { TEXT, formatSpeed, formatTime } from './text';
 
 export class Hud {
@@ -19,17 +19,22 @@ export class Hud {
   private readonly progressFill: HTMLElement;
   private readonly bestValue: HTMLElement;
   private readonly lightsValue: HTMLElement;
+  private readonly fallsValue: HTMLElement;
+  private readonly notice: HTMLElement;
   private readonly countdown: HTMLElement;
   private readonly warning: HTMLElement;
   private readonly moodFill: HTMLElement;
 
   private lastCountdown = -1;
+  private lastFalls = 0;
 
   constructor() {
     this.timeValue = el('div', { class: 'hud-time', text: '0:00.00' });
     this.speedValue = el('div', { class: 'hud-speed', text: '0 km/h' });
     this.bestValue = el('div', { class: 'hud-best', text: `${TEXT.bestTime} --:--.--` });
     this.lightsValue = el('div', { class: 'hud-lights', text: '0' });
+    this.fallsValue = el('div', { class: 'hud-falls', text: '' });
+    this.notice = el('div', { class: 'hud-notice' });
     this.progressFill = el('div', { class: 'hud-progress-fill' });
     this.moodFill = el('div', { class: 'hud-mood-fill' });
     this.countdown = el('div', { class: 'hud-countdown', text: '' });
@@ -59,6 +64,7 @@ export class Hud {
             el('span', { class: 'hud-light-dot', text: '✦' }),
             this.lightsValue,
           ),
+          this.fallsValue,
         ),
       ),
       el(
@@ -73,6 +79,7 @@ export class Hud {
         this.moodFill,
       ),
       this.countdown,
+      this.notice,
       this.warning,
     );
   }
@@ -96,6 +103,13 @@ export class Hud {
     this.timeValue.textContent = formatTime(session.seconds);
     this.speedValue.textContent = formatSpeed(world.speedFor(0) / ONE);
     this.lightsValue.textContent = String(world.collected[0]);
+
+    const falls = world.falls[0];
+    this.fallsValue.textContent = falls > 0 ? `${TEXT.falls} ${falls}` : '';
+    if (falls !== this.lastFalls) {
+      this.lastFalls = falls;
+      if (falls > 0) this.showNotice();
+    }
 
     const progress = world.progressFor(0) / ONE;
     this.progressFill.style.width = `${Math.round(progress * 100)}%`;
@@ -131,10 +145,26 @@ export class Hud {
     this.warning.classList.toggle('is-showing', nearEdge && world.state[0] === RunState.Rolling);
   }
 
+  /** Says, briefly, that the ball went over the edge and has been put back. */
+  private showNotice(): void {
+    clear(this.notice);
+    this.notice.append(
+      el('div', { class: 'hud-notice-title', text: TEXT.fellOff }),
+      el('div', { class: 'hud-notice-line', text: TEXT.fellOffHint }),
+    );
+    this.notice.classList.remove('is-showing');
+    void this.notice.offsetWidth;
+    this.notice.classList.add('is-showing');
+    window.setTimeout(() => this.notice.classList.remove('is-showing'), 1400);
+  }
+
   /** Puts the countdown back to the start for a fresh attempt. */
   reset(): void {
     this.lastCountdown = -1;
+    this.lastFalls = 0;
     this.countdown.textContent = '';
+    this.fallsValue.textContent = '';
+    this.notice.classList.remove('is-showing');
     this.warning.classList.remove('is-showing');
   }
 }

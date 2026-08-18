@@ -9,6 +9,7 @@ import { BufferGeometry, Group, Mesh } from 'three';
 import { buildCourse } from '../src/core/course';
 import {
   SHAPE_CELLS,
+  SHAPE_SIZE,
   cellIndex,
   cubeShape,
   defaultShape,
@@ -111,7 +112,7 @@ describe('building the ball to look at', () => {
     const index = built.geometry.getIndex();
     // A solid block is six flat sides, however many cubes are hidden inside.
     expect(index).not.toBeNull();
-    expect(index && index.count / 3).toBe(6 * 9 * 9 * 2);
+    expect(index && index.count / 3).toBe(6 * SHAPE_SIZE * SHAPE_SIZE * 2);
   });
 
   it('gives a single cube its six sides', () => {
@@ -150,6 +151,46 @@ describe('building the ball to look at', () => {
     if (box) {
       expect(Math.abs(box.min.x + box.max.x)).toBeLessThan(0.001);
       expect(Math.abs(box.min.y + box.max.y)).toBeLessThan(0.001);
+    }
+  });
+
+  it('faces every side outwards, so the ball is solid rather than see-through', () => {
+    // Three.js draws only the front of a triangle. Wind them the wrong way
+    // and the near side of the ball is thrown away, leaving it looking
+    // transparent, and a tap aimed at the surface lands on the far side.
+    for (const voxels of [defaultShape(), cubeShape(), pebbleShape()]) {
+      const built = buildBallGeometry(voxels);
+      const position = built.geometry.getAttribute('position');
+      const normal = built.geometry.getAttribute('normal');
+      const index = built.geometry.getIndex();
+      expect(index).not.toBeNull();
+      if (!index) continue;
+
+      let inward = 0;
+      for (let triangle = 0; triangle < index.count / 3; triangle++) {
+        const a = index.getX(triangle * 3);
+        const b = index.getX(triangle * 3 + 1);
+        const c = index.getX(triangle * 3 + 2);
+        const e1 = [
+          position.getX(b) - position.getX(a),
+          position.getY(b) - position.getY(a),
+          position.getZ(b) - position.getZ(a),
+        ];
+        const e2 = [
+          position.getX(c) - position.getX(a),
+          position.getY(c) - position.getY(a),
+          position.getZ(c) - position.getZ(a),
+        ];
+        const wound = [
+          e1[1] * e2[2] - e1[2] * e2[1],
+          e1[2] * e2[0] - e1[0] * e2[2],
+          e1[0] * e2[1] - e1[1] * e2[0],
+        ];
+        const facing =
+          wound[0] * normal.getX(a) + wound[1] * normal.getY(a) + wound[2] * normal.getZ(a);
+        if (facing <= 0) inward++;
+      }
+      expect(inward).toBe(0);
     }
   });
 
@@ -205,7 +246,9 @@ describe('building the ball to look at', () => {
   it('stays light enough for a phone', () => {
     for (const voxels of [defaultShape(), cubeShape(), pebbleShape()]) {
       const built = buildBallGeometry(voxels);
-      expect(built.faces.length / 2).toBeLessThan(600);
+      // Finer cubes mean more sides, but only the ones you can see are built,
+      // so the count grows with the surface rather than with the volume.
+      expect(built.faces.length / 2).toBeLessThan(2200);
     }
   });
 });

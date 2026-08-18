@@ -114,32 +114,67 @@ body {
 
 .title-card {
   text-align: center;
-  max-width: 560px;
-  padding: clamp(20px, 5vw, 40px);
+  width: min(620px, 100%);
+  padding: clamp(18px, 4vw, 36px) clamp(20px, 5vw, 44px);
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: calc(var(--radius) + 8px);
   backdrop-filter: blur(8px);
 }
 
+/*
+ * The title is set as two lines on purpose. At any size large enough to
+ * read, the whole phrase is wider than a phone screen, and left to wrap on
+ * its own it splits in the middle of a word.
+ */
 .title {
-  margin: 0 0 8px;
-  font-size: clamp(28px, 7vw, 46px);
-  letter-spacing: 0.04em;
-  color: var(--accent);
+  margin: 0 0 10px;
+  display: grid;
+  gap: 2px;
+  line-height: 1.1;
   text-shadow: 0 4px 22px rgba(255, 159, 28, 0.35);
 }
 
-.tagline {
-  margin: 0 0 24px;
+.title-lead {
+  font-size: clamp(15px, 3.6vw, 21px);
+  letter-spacing: 0.34em;
+  /* The tracking adds space on the right; this keeps the line centred. */
+  text-indent: 0.34em;
   color: var(--ink-soft);
-  font-size: clamp(13px, 3.4vw, 16px);
+  font-weight: 600;
+}
+
+.title-main {
+  font-size: clamp(30px, 8.2vw, 52px);
+  letter-spacing: 0.06em;
+  text-indent: 0.06em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.tagline {
+  margin: 0 auto 22px;
+  max-width: 30em;
+  color: var(--ink-soft);
+  font-size: clamp(12px, 3.2vw, 15px);
   line-height: 1.7;
 }
 
 .title-buttons {
   display: grid;
   gap: 10px;
+}
+
+/* Side by side once there is room, so the card stays short on a laptop. */
+@media (min-width: 560px) {
+  .title-buttons {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .title-buttons .button.primary,
+  .title-buttons .button.wide {
+    grid-column: 1 / -1;
+  }
 }
 
 .panel {
@@ -564,8 +599,41 @@ body {
   background: linear-gradient(120deg, rgba(103, 232, 160, 0.24), transparent);
 }
 
-.panel.is-lose .panel-head {
-  background: linear-gradient(120deg, rgba(255, 123, 123, 0.24), transparent);
+.hud-falls {
+  font-size: 12px;
+  color: var(--bad);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A short word when the ball goes over the edge and is put back. */
+.hud-notice {
+  position: fixed;
+  inset: auto 0 22% 0;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.hud-notice.is-showing {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.hud-notice-title {
+  font-size: clamp(28px, 8vw, 46px);
+  font-weight: 800;
+  color: var(--bad);
+  text-shadow: 0 6px 26px rgba(0, 0, 0, 0.5);
+}
+
+.hud-notice-line {
+  font-size: clamp(13px, 3.4vw, 16px);
+  color: var(--ink);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
 }
 
 /* ----------------------------------------------------------------- editor */
@@ -673,6 +741,31 @@ body {
   transform: scale(1.08);
 }
 
+/* A row of large, obvious tool buttons: which one is on must be unmissable. */
+.tool-row .button.is-active {
+  background: rgba(255, 209, 102, 0.26);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255, 209, 102, 0.25);
+}
+
+.editor-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.editor-readout-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid var(--edge);
+  background: transparent;
+}
+
 .editor-stats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -729,6 +822,44 @@ body {
 
   .stage-swatch {
     width: 46px;
+  }
+}
+
+@media (max-height: 620px) {
+  .title-card {
+    padding: 16px clamp(18px, 4vw, 36px);
+  }
+
+  .title {
+    margin-bottom: 6px;
+  }
+
+  .tagline {
+    margin-bottom: 14px;
+  }
+
+  .title-buttons {
+    gap: 8px;
+  }
+
+  .title-buttons .button {
+    min-height: 44px;
+    padding: 10px 18px;
+  }
+}
+
+/* A phone held sideways leaves very little height; drop to the essentials. */
+@media (max-height: 430px) {
+  .title-card {
+    padding: 12px clamp(18px, 4vw, 36px);
+  }
+
+  .title-main {
+    font-size: clamp(26px, 6.4vh, 38px);
+  }
+
+  .tagline {
+    display: none;
   }
 }
 

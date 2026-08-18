@@ -12,17 +12,27 @@
 
 import { ONE, clamp, div, mul, sqrt } from './fixed';
 
-/** Cubes per side of the editing space. Odd, so there is a middle cube. */
-export const SHAPE_SIZE = 9;
+/**
+ * Cubes per side of the editing space.
+ *
+ * Twice the old count, with cubes half the size, so a ball is exactly as big
+ * as it was but built from eight times as many pieces. That makes a round
+ * ball noticeably rounder and gives the workshop much finer control.
+ */
+export const SHAPE_SIZE = 18;
 
 /** Total number of cube slots. */
 export const SHAPE_CELLS = SHAPE_SIZE * SHAPE_SIZE * SHAPE_SIZE;
 
-/** Middle cube along each side. */
+/**
+ * The middle of the editing space, in cube steps. With an even number of
+ * cubes per side this falls between two of them, which every measurement
+ * here copes with.
+ */
 export const SHAPE_CENTRE = (SHAPE_SIZE - 1) / 2;
 
 /** How wide one cube is, in metres, at the standard ball size. */
-export const CUBE_METRES = 0.1;
+export const CUBE_METRES = 0.05;
 
 /** Colours a cube can be painted. Slot 0 means "no cube here". */
 export const PALETTE = [
@@ -111,7 +121,7 @@ function paintPattern(voxels: Uint8Array, colour: number): void {
 /** The ball everybody starts with: as round as the cubes allow. */
 export function defaultShape(colour = 5): Uint8Array {
   const voxels = new Uint8Array(SHAPE_CELLS);
-  const limit = 4.35 * 4.35;
+  const limit = 8.7 * 8.7;
   for (let x = 0; x < SHAPE_SIZE; x++) {
     for (let y = 0; y < SHAPE_SIZE; y++) {
       for (let z = 0; z < SHAPE_SIZE; z++) {
@@ -131,9 +141,9 @@ export function defaultShape(colour = 5): Uint8Array {
 /** A cube, for a chunky, skiddy ride. */
 export function cubeShape(colour = 2): Uint8Array {
   const voxels = new Uint8Array(SHAPE_CELLS);
-  for (let x = 1; x < SHAPE_SIZE - 1; x++) {
-    for (let y = 1; y < SHAPE_SIZE - 1; y++) {
-      for (let z = 1; z < SHAPE_SIZE - 1; z++) {
+  for (let x = 2; x < SHAPE_SIZE - 2; x++) {
+    for (let y = 2; y < SHAPE_SIZE - 2; y++) {
+      for (let z = 2; z < SHAPE_SIZE - 2; z++) {
         voxels[cellIndex(x, y, z)] = colour;
       }
     }
@@ -145,7 +155,7 @@ export function cubeShape(colour = 2): Uint8Array {
 /** A small, light ball that darts about. */
 export function pebbleShape(colour = 4): Uint8Array {
   const voxels = new Uint8Array(SHAPE_CELLS);
-  const limit = 2.8 * 2.8;
+  const limit = 5.2 * 5.2;
   for (let x = 0; x < SHAPE_SIZE; x++) {
     for (let y = 0; y < SHAPE_SIZE; y++) {
       for (let z = 0; z < SHAPE_SIZE; z++) {
@@ -360,9 +370,51 @@ export function shapeToText(voxels: Uint8Array): string {
   return parts.join(',');
 }
 
-/** Unpacks a design saved by {@link shapeToText}. */
-export function shapeFromText(text: string): Uint8Array {
+/**
+ * How many cube slots a saved design covers, without unpacking it. Used to
+ * spot a design saved before the cubes were made finer.
+ */
+export function shapeTextCells(text: string): number {
+  let total = 0;
+  for (const part of text.split(',')) {
+    const count = Number(part.split(':')[0]);
+    if (Number.isFinite(count) && count > 0) total += count;
+  }
+  return total;
+}
+
+/**
+ * Doubles a design built in the old, coarser space so that it fills the new
+ * one: every old cube becomes a two-by-two-by-two block. A ball built before
+ * the change comes back looking exactly as it did.
+ */
+export function upscaleShape(coarse: Uint8Array, coarseSize: number): Uint8Array {
   const voxels = new Uint8Array(SHAPE_CELLS);
+  const scale = Math.max(1, Math.round(SHAPE_SIZE / coarseSize));
+  for (let x = 0; x < coarseSize; x++) {
+    for (let y = 0; y < coarseSize; y++) {
+      for (let z = 0; z < coarseSize; z++) {
+        const slot = coarse[(x * coarseSize + y) * coarseSize + z];
+        if (slot === 0) continue;
+        for (let ox = 0; ox < scale; ox++) {
+          for (let oy = 0; oy < scale; oy++) {
+            for (let oz = 0; oz < scale; oz++) {
+              const nx = x * scale + ox;
+              const ny = y * scale + oy;
+              const nz = z * scale + oz;
+              if (insideShape(nx, ny, nz)) voxels[cellIndex(nx, ny, nz)] = slot;
+            }
+          }
+        }
+      }
+    }
+  }
+  return voxels;
+}
+
+/** Unpacks a design saved by {@link shapeToText}. */
+export function shapeFromText(text: string, cells = SHAPE_CELLS): Uint8Array {
+  const voxels = new Uint8Array(cells);
   let at = 0;
   for (const part of text.split(',')) {
     const [countText, valueText] = part.split(':');

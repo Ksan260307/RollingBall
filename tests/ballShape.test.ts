@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUBE_METRES,
   PALETTE,
   SHAPE_CELLS,
   SHAPE_CENTRE,
@@ -105,7 +106,7 @@ describe('the ready-made shapes', () => {
     expect(b.smoothness).toBe(a.smoothness);
   });
 
-  it('rests on its body, not on a cube poking out on its own', () => {
+  it('rests on its body, not on cubes poking out on their own', () => {
     // A ball with a whisker or two is a normal thing to build in the
     // workshop. If a single sticking-out cube set the resting height, the
     // whole ball would hover above the floor and turn too slowly for the
@@ -117,16 +118,20 @@ describe('the ready-made shapes', () => {
           const dx = x - SHAPE_CENTRE;
           const dy = y - SHAPE_CENTRE;
           const dz = z - SHAPE_CENTRE;
-          if (dx * dx + dy * dy + dz * dz <= 3.4 * 3.4) body[cellIndex(x, y, z)] = 5;
+          if (dx * dx + dy * dy + dz * dz <= 6.8 * 6.8) body[cellIndex(x, y, z)] = 5;
         }
       }
     }
     const plain = measureShape(body);
 
+    // Two-cube whiskers growing out of the body on three sides.
     const whiskered = Uint8Array.from(body);
-    whiskered[cellIndex(0, 4, 4)] = 4;
-    whiskered[cellIndex(4, 8, 4)] = 4;
-    whiskered[cellIndex(8, 4, 4)] = 4;
+    whiskered[cellIndex(16, 9, 9)] = 4;
+    whiskered[cellIndex(17, 9, 9)] = 4;
+    whiskered[cellIndex(1, 9, 9)] = 4;
+    whiskered[cellIndex(0, 9, 9)] = 4;
+    whiskered[cellIndex(9, 16, 9)] = 4;
+    whiskered[cellIndex(9, 17, 9)] = 4;
     const bumpy = measureShape(whiskered);
 
     expect(bumpy.radius).toBe(plain.radius);
@@ -137,10 +142,11 @@ describe('the ready-made shapes', () => {
   });
 
   it('still uses a lone cube when there is nothing else to rest on', () => {
+    const middle = Math.ceil(SHAPE_CENTRE);
     const single = new Uint8Array(SHAPE_CELLS);
-    single[cellIndex(4, 4, 4)] = 3;
+    single[cellIndex(middle, middle, middle)] = 3;
     const stats = measureShape(single);
-    expect(toNumber(stats.radius)).toBeCloseTo(0.05, 3);
+    expect(toNumber(stats.radius)).toBeCloseTo(CUBE_METRES, 3);
   });
 
   it('makes a box less round than a ball', () => {
@@ -178,7 +184,7 @@ describe('saving and loading a design', () => {
   });
 
   it('stays small enough to keep in the browser', () => {
-    expect(shapeToText(defaultShape()).length).toBeLessThan(1200);
+    expect(shapeToText(defaultShape()).length).toBeLessThan(6000);
   });
 
   it('survives text that makes no sense', () => {

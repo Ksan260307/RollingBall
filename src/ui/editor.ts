@@ -13,11 +13,16 @@
 
 import {
   AmbientLight,
+  BoxGeometry,
   Color,
   DirectionalLight,
+  EdgesGeometry,
   Group,
   HemisphereLight,
+  LineBasicMaterial,
+  LineSegments,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
   Raycaster,
@@ -28,6 +33,7 @@ import {
 import {
   CUBE_METRES,
   PALETTE,
+  SHAPE_CENTRE,
   cellIndex,
   cubeShape,
   defaultShape,
@@ -43,6 +49,15 @@ import { button, clear, el, slider } from './dom';
 import { TEXT } from './text';
 
 type Tool = 'add' | 'remove' | 'paint';
+
+/** The cube a tap is aimed at, and whether it is about to be created. */
+interface EditTarget {
+  x: number;
+  y: number;
+  z: number;
+  cell: number;
+  adding: boolean;
+}
 
 /** Largest picture the game will try to read, in bytes. */
 const MAX_PHOTO_BYTES = 24 * 1024 * 1024;
@@ -66,12 +81,26 @@ export class BallEditor {
   private tool: Tool = 'remove';
   private colour = 5;
 
+  /** The outline showing which cube a tap would act on. */
+  private marker: Group | null = null;
+  private markerFace: Mesh | null = null;
+  private markerEdges: LineSegments | null = null;
+  /** Designs from before the last few changes, so they can be taken back. */
+  private readonly history: Uint8Array[] = [];
+  /** What this gesture is doing: turning the ball, or working on it. */
+  private gesture: 'none' | 'turn' | 'edit' = 'none';
+  /** The last cube this gesture changed, so a drag does not redo the same one. */
+  private lastTouched = -1;
+  private changesThisGesture = 0;
+
   private spinX = 0.5;
   private spinY = 0.6;
   private distance = 2.6;
   private animating = false;
 
   private readonly statsRow: HTMLElement;
+  private readonly readout: HTMLElement;
+  private undoButton: HTMLButtonElement | null = null;
   private readonly paletteRow: HTMLElement;
   private readonly toolRow: HTMLElement;
   private readonly noticeRow: HTMLElement;
@@ -81,7 +110,6 @@ export class BallEditor {
 
   private watcher: ResizeObserver | null = null;
   private pointerStart: { x: number; y: number; id: number } | null = null;
-  private dragged = false;
   private readonly pinch = new Map<number, { x: number; y: number }>();
   private pinchDistance = 0;
 
@@ -90,6 +118,7 @@ export class BallEditor {
 
     this.canvas = el('canvas', { class: 'editor-canvas' }) as HTMLCanvasElement;
     this.statsRow = el('div', { class: 'editor-stats' });
+    this.readout = el('div', { class: 'editor-readout' });
     this.paletteRow = el('div', { class: 'palette' });
     this.toolRow = el('div', { class: 'tool-row' });
     this.noticeRow = el('div', { class: 'editor-notice' });
@@ -128,6 +157,7 @@ export class BallEditor {
             { class: 'editor-side' },
             el('p', { class: 'editor-hint', text: TEXT.editorHint }),
             this.toolRow,
+            this.readout,
             this.paletteRow,
             el(
               'div',
@@ -155,9 +185,10 @@ export class BallEditor {
             el(
               'div',
               { class: 'tool-row' },
+              (this.undoButton = button(TEXT.undo, () => this.undo(), 'ghost')),
               button(TEXT.reset, () => this.usePreset(defaultShape(5)), 'ghost'),
-              button(TEXT.save, () => this.saveHandler?.(this.currentDesign()), 'primary'),
             ),
+            button(TEXT.save, () => this.saveHandler?.(this.currentDesign()), 'primary'),
             this.fileInput,
           ),
         ),
@@ -179,6 +210,7 @@ export class BallEditor {
       const node = button(tool.label, () => {
         this.tool = tool.id;
         this.buildTools();
+        this.refreshReadout();
       });
       node.classList.toggle('is-active', this.tool === tool.id);
       this.toolRow.append(node);
@@ -195,6 +227,7 @@ export class BallEditor {
           click: () => {
             this.colour = i;
             this.buildPalette();
+            this.refreshReadout();
           },
         },
       });
@@ -211,12 +244,49 @@ export class BallEditor {
     sun.position.set(2.5, 4, 3);
     this.scene.add(sun);
     this.scene.background = new Color('#1a1f33');
+    this.buildMarker();
     this.rebuild();
+    this.refreshReadout();
+  }
+
+  /**
+   * Builds the outline that shows which cube is about to be worked on.
+   *
+   * Without it, tapping a ball made of thousands of small cubes is guesswork:
+   * the outline says exactly which one will go, or exactly where a new one
+   * will appear, before anything is changed.
+   */
+  private buildMarker(): void {
+    const size = CUBE_METRES * 1.02;
+    const box = new BoxGeometry(size, size, size);
+    const face = new Mesh(
+      box,
+      new MeshBasicMaterial({ transparent: true, opacity: 0.32, depthTest: false }),
+    );
+    const edges = new LineSegments(
+      new EdgesGeometry(box),
+      new LineBasicMaterial({ depthTest: false }),
+    );
+    const group = new Group();
+    group.add(face, edges);
+    group.visible = false;
+    // Drawn last so it is never hidden inside the ball.
+    group.renderOrder = 10;
+    this.scene.add(group);
+    this.marker = group;
+    this.markerFace = face;
+    this.markerEdges = edges;
   }
 
   /** Starts drawing and shows the workshop. */
   open(design: BallDesign): void {
     this.design = { ...design, voxels: Uint8Array.from(design.voxels) };
+    this.history.length = 0;
+    this.gesture = 'none';
+    this.lastTouched = -1;
+    this.showTarget(null);
+    this.refreshUndo();
+    this.refreshReadout();
     this.rebuild();
     void this.applyPhoto();
     if (!this.renderer) {
@@ -224,6 +294,10 @@ export class BallEditor {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     }
     this.animating = true;
+    // Put the camera where it belongs straight away rather than waiting for
+    // the first frame, so a tap made immediately still aims from the right
+    // place.
+    this.updateCamera();
     this.resize();
     if (typeof ResizeObserver !== 'undefined' && !this.watcher) {
       this.watcher = new ResizeObserver(() => this.resize());
@@ -334,7 +408,9 @@ export class BallEditor {
   }
 
   private usePreset(voxels: Uint8Array): void {
+    this.rememberForUndo();
     this.design.voxels = voxels;
+    this.showTarget(null);
     this.rebuild();
   }
 
@@ -344,11 +420,26 @@ export class BallEditor {
       if (this.pinch.size === 2) {
         this.pinchDistance = this.pinchSpread();
         this.pointerStart = null;
+        this.gesture = 'none';
+        this.showTarget(null);
         return;
       }
       this.pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
-      this.dragged = false;
       capturePointer(this.canvas, event.pointerId);
+
+      // Pressing on the ball works on it; pressing on empty space turns it.
+      // Nothing has to be learned: whatever is under the finger is what
+      // responds, and the outline has already shown which cube that is.
+      const target = this.targetAt(event.clientX, event.clientY);
+      if (target) {
+        this.gesture = 'edit';
+        this.lastTouched = -1;
+        this.changesThisGesture = 0;
+        this.rememberForUndo();
+        this.applyTo(target);
+      } else {
+        this.gesture = 'turn';
+      }
     });
 
     this.canvas.addEventListener('pointermove', (event) => {
@@ -363,26 +454,43 @@ export class BallEditor {
         this.pinchDistance = spread;
         return;
       }
+
+      if (this.gesture === 'none') {
+        // Nothing held down: just show what a tap would do.
+        this.showTarget(this.targetAt(event.clientX, event.clientY));
+        return;
+      }
       if (!this.pointerStart || event.pointerId !== this.pointerStart.id) return;
-      const dx = event.clientX - this.pointerStart.x;
-      const dy = event.clientY - this.pointerStart.y;
-      if (Math.abs(dx) + Math.abs(dy) > 6) this.dragged = true;
-      if (this.dragged) {
+
+      if (this.gesture === 'turn') {
+        const dx = event.clientX - this.pointerStart.x;
+        const dy = event.clientY - this.pointerStart.y;
         this.spinY -= dx * 0.008;
         this.spinX = clampRange(this.spinX + dy * 0.008, -1.35, 1.35);
         this.pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
+        return;
       }
+
+      // Still working on the ball: carry on into whatever the finger reaches,
+      // so a whole groove or ridge can be drawn in one stroke.
+      const target = this.targetAt(event.clientX, event.clientY);
+      this.showTarget(target);
+      if (target) this.applyTo(target);
     });
 
     const finish = (event: PointerEvent): void => {
       this.pinch.delete(event.pointerId);
       if (this.pinch.size < 2) this.pinchDistance = 0;
       if (!this.pointerStart || event.pointerId !== this.pointerStart.id) return;
-      if (!this.dragged) this.tapAt(event.clientX, event.clientY);
       this.pointerStart = null;
+      this.gesture = 'none';
+      this.lastTouched = -1;
     };
     this.canvas.addEventListener('pointerup', finish);
     this.canvas.addEventListener('pointercancel', finish);
+    this.canvas.addEventListener('pointerleave', () => {
+      if (this.gesture === 'none') this.showTarget(null);
+    });
 
     this.canvas.addEventListener(
       'wheel',
@@ -402,43 +510,127 @@ export class BallEditor {
     return Math.sqrt(dx * dx + dy * dy);
   }
 
-  /** Works out which cube was tapped and applies the current tool. */
-  private tapAt(clientX: number, clientY: number): void {
-    if (!this.mesh) return;
+  /**
+   * Works out which cube is under a point on screen, and what the current
+   * tool would do to it.
+   *
+   * @returns the cube to act on, or null when the ball is not under the point
+   */
+  private targetAt(clientX: number, clientY: number): EditTarget | null {
+    if (!this.mesh) return null;
     const bounds = this.canvas.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return null;
     const pointer = new Vector2(
       ((clientX - bounds.left) / bounds.width) * 2 - 1,
       -((clientY - bounds.top) / bounds.height) * 2 + 1,
     );
     const caster = new Raycaster();
+    this.camera.updateMatrixWorld();
     caster.setFromCamera(pointer, this.camera);
     const hits = caster.intersectObject(this.mesh, false);
-    if (hits.length === 0) return;
+    if (hits.length === 0) return null;
     const faceIndex = hits[0].faceIndex;
-    if (faceIndex === undefined || faceIndex === null) return;
+    if (faceIndex === undefined || faceIndex === null) return null;
     const face = this.faces[faceIndex];
-    if (!face) return;
+    if (!face) return null;
 
-    const voxels = this.design.voxels;
-    if (this.tool === 'remove') {
-      const remaining = countCubes(voxels) - 1;
-      if (remaining < 1) {
-        this.notice(TEXT.needBlocks);
-        return;
-      }
-      voxels[face.cell] = 0;
-      // Carving can leave a cube floating on its own; drop the strays.
-      this.design.voxels = largestConnectedPart(voxels);
-    } else if (this.tool === 'add') {
+    if (this.tool === 'add') {
+      // A new cube goes against the side that was pointed at.
       const x = face.x + face.nx;
       const y = face.y + face.ny;
       const z = face.z + face.nz;
-      if (!insideShape(x, y, z)) return;
-      voxels[cellIndex(x, y, z)] = this.colour;
-    } else {
-      voxels[face.cell] = this.colour;
+      if (!insideShape(x, y, z)) return null;
+      return { x, y, z, cell: cellIndex(x, y, z), adding: true };
     }
+    return { x: face.x, y: face.y, z: face.z, cell: face.cell, adding: false };
+  }
+
+  /** Moves the outline onto a cube, or hides it. */
+  private showTarget(target: EditTarget | null): void {
+    if (!this.marker) return;
+    if (!target) {
+      this.marker.visible = false;
+      return;
+    }
+    this.marker.visible = true;
+    this.marker.position.set(
+      (target.x - SHAPE_CENTRE) * CUBE_METRES,
+      (target.y - SHAPE_CENTRE) * CUBE_METRES,
+      (target.z - SHAPE_CENTRE) * CUBE_METRES,
+    );
+    const tint =
+      this.tool === 'remove' ? '#ff7b7b' : this.tool === 'add' ? '#ffd166' : PALETTE[this.colour];
+    (this.markerFace?.material as MeshBasicMaterial | undefined)?.color.set(tint);
+    (this.markerEdges?.material as LineBasicMaterial | undefined)?.color.set('#ffffff');
+  }
+
+  /** Does whatever the current tool does to one cube. */
+  private applyTo(target: EditTarget): void {
+    if (target.cell === this.lastTouched) return;
+    // One stroke is not allowed to run away with the whole ball.
+    if (this.changesThisGesture >= 200) return;
+    const voxels = this.design.voxels;
+
+    if (this.tool === 'remove') {
+      if (voxels[target.cell] === 0) return;
+      if (countCubes(voxels) <= 1) {
+        this.notice(TEXT.needBlocks);
+        return;
+      }
+      voxels[target.cell] = 0;
+      // Carving can leave a cube floating on its own; drop the strays.
+      this.design.voxels = largestConnectedPart(voxels);
+    } else if (this.tool === 'add') {
+      if (voxels[target.cell] !== 0) return;
+      voxels[target.cell] = this.colour;
+    } else {
+      if (voxels[target.cell] === 0 || voxels[target.cell] === this.colour) return;
+      voxels[target.cell] = this.colour;
+    }
+
+    this.lastTouched = target.cell;
+    this.changesThisGesture++;
     this.rebuild();
+    this.showTarget(target);
+  }
+
+  /** Keeps a copy of the design so the last change can be taken back. */
+  private rememberForUndo(): void {
+    this.history.push(Uint8Array.from(this.design.voxels));
+    if (this.history.length > 30) this.history.shift();
+    this.refreshUndo();
+  }
+
+  /** Takes back the last change. */
+  private undo(): void {
+    const previous = this.history.pop();
+    if (!previous) return;
+    this.design.voxels = previous;
+    this.rebuild();
+    this.refreshUndo();
+  }
+
+  private refreshUndo(): void {
+    if (!this.undoButton) return;
+    this.undoButton.disabled = this.history.length === 0;
+    this.undoButton.style.opacity = this.history.length === 0 ? '0.4' : '1';
+  }
+
+  /** Says in words what a tap will do right now. */
+  private refreshReadout(): void {
+    clear(this.readout);
+    const label =
+      this.tool === 'remove'
+        ? TEXT.toolRemove
+        : this.tool === 'add'
+          ? TEXT.toolAdd
+          : TEXT.toolPaint;
+    const tint =
+      this.tool === 'remove' ? '#ff7b7b' : this.tool === 'add' ? '#ffd166' : PALETTE[this.colour];
+    this.readout.append(
+      el('span', { class: 'editor-readout-swatch', attrs: { style: `background:${tint}` } }),
+      el('span', { text: `${TEXT.editorTarget}: ${label}` }),
+    );
   }
 
   /** Reads the picture the player picked and shrinks it down for storage. */

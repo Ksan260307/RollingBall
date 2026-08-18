@@ -73,6 +73,7 @@ describe('the words on screen', () => {
       'エントロピー',
       'カリング',
       'ロールバック',
+      'リスポーン',
       '決定論',
       '固定小数点',
       '状態遷移',
@@ -200,6 +201,7 @@ describe('the screens', () => {
         metres: 102,
         topSpeed: 12.5,
         collected: 4,
+        falls: 2,
         finished: true,
         checksum: 1,
       },
@@ -212,27 +214,28 @@ describe('the screens', () => {
     expect(text).toContain('0:18.25');
     expect(text).toContain(TEXT.newRecord);
     expect(text).toContain('45 km/h');
+    expect(text).toContain(TEXT.falls);
   });
 
-  it('shows a run that ended early with a word of advice instead', () => {
+  it('leaves the new-best flag off when the time was not a best', () => {
     const screens = makeScreens();
     screens.setResult(
       {
         stageId: 'skyway',
-        seconds: 6,
-        metres: 40,
+        seconds: 26,
+        metres: 110,
         topSpeed: 9,
         collected: 0,
-        finished: false,
+        falls: 0,
+        finished: true,
         checksum: 1,
       },
       STAGES[2],
-      undefined,
+      20,
       false,
     );
     const text = screens.root.textContent ?? '';
-    expect(text).toContain(TEXT.fallen);
-    expect(text).toContain(TEXT.fallenHint);
+    expect(text).toContain(TEXT.finished);
     expect(text).not.toContain(TEXT.newRecord);
   });
 
@@ -244,6 +247,7 @@ describe('the screens', () => {
       metres: 110,
       topSpeed: 12,
       collected: 1,
+      falls: 0,
       finished: true,
       checksum: 1,
     };
