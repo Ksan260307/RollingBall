@@ -1,0 +1,70 @@
+name: build and publish
+
+# Every push and every pull request is checked. Pushes to the main branch are
+# also published to GitHub Pages, so the playable version is always whatever
+# is on main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: types, tests and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: check the types
+        run: npm run typecheck
+
+      - name: run the tests
+        run: npm run test
+
+      - name: build
+        env:
+          # On GitHub Pages the game lives in a folder named after the
+          # repository, so the build has to know that up front.
+          BASE_PATH: /${{ github.event.repository.name }}/
+        run: npm run build
+
+      - name: keep every file, including ones starting with an underscore
+        run: touch dist/.nojekyll
+
+      - name: hand the built game to the publish step
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  publish:
+    name: publish to GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: publish
+        id: deploy
+        uses: actions/deploy-pages@v4

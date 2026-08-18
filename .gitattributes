@@ -1,0 +1,4 @@
+# Keep line endings consistent for everyone working on the game.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

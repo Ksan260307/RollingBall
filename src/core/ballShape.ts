@@ -1,0 +1,281 @@
+/**
+ * The player's ball, described as a small block of cubes.
+ *
+ * The editor lets the player carve cubes away and stick new ones on, so the
+ * ball can end up as anything from a smooth sphere to a lopsided lump. This
+ * file turns whatever they built into the handful of numbers the physics
+ * needs: how big it is, how heavy it is, and how smoothly it rolls.
+ *
+ * The numbers come out of whole-number arithmetic so that two players with
+ * the same design always get exactly the same handling.
+ */
+
+import { ONE, div, mul, sqrt } from './fixed';
+
+/** Cubes per side of the editing space. Odd, so there is a middle cube. */
+export const SHAPE_SIZE = 9;
+
+/** Total number of cube slots. */
+export const SHAPE_CELLS = SHAPE_SIZE * SHAPE_SIZE * SHAPE_SIZE;
+
+/** Middle cube along each side. */
+export const SHAPE_CENTRE = (SHAPE_SIZE - 1) / 2;
+
+/** How wide one cube is, in metres, at the standard ball size. */
+export const CUBE_METRES = 0.1;
+
+/** Colours a cube can be painted. Slot 0 means "no cube here". */
+export const PALETTE = [
+  '#000000',
+  '#ff5b6e',
+  '#ffb03a',
+  '#ffe45e',
+  '#66d97a',
+  '#4fc3f7',
+  '#8f7bff',
+  '#ff8fd0',
+  '#f5f5f5',
+  '#3a3f52',
+];
+
+/** Half a cube, in stored metres; reach is measured in half-cube steps. */
+const HALF_CUBE = Math.round((CUBE_METRES / 2) * ONE);
+
+/** Turns a cube position into its slot number. */
+export function cellIndex(x: number, y: number, z: number): number {
+  return (x * SHAPE_SIZE + y) * SHAPE_SIZE + z;
+}
+
+/** True when a cube position is inside the editing space. */
+export function insideShape(x: number, y: number, z: number): boolean {
+  return (
+    x >= 0 && y >= 0 && z >= 0 && x < SHAPE_SIZE && y < SHAPE_SIZE && z < SHAPE_SIZE
+  );
+}
+
+/** Reads a slot, treating anything outside the space as empty. */
+export function cellAt(voxels: Uint8Array, x: number, y: number, z: number): number {
+  if (!insideShape(x, y, z)) return 0;
+  return voxels[cellIndex(x, y, z)];
+}
+
+/** The ball everybody starts with: as round as the cubes allow. */
+export function defaultShape(colour = 5): Uint8Array {
+  const voxels = new Uint8Array(SHAPE_CELLS);
+  const limit = 4.35 * 4.35;
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        const dx = x - SHAPE_CENTRE;
+        const dy = y - SHAPE_CENTRE;
+        const dz = z - SHAPE_CENTRE;
+        if (dx * dx + dy * dy + dz * dz <= limit) {
+          voxels[cellIndex(x, y, z)] = colour;
+        }
+      }
+    }
+  }
+  return voxels;
+}
+
+/** A cube, for a chunky, skiddy ride. */
+export function cubeShape(colour = 2): Uint8Array {
+  const voxels = new Uint8Array(SHAPE_CELLS);
+  for (let x = 1; x < SHAPE_SIZE - 1; x++) {
+    for (let y = 1; y < SHAPE_SIZE - 1; y++) {
+      for (let z = 1; z < SHAPE_SIZE - 1; z++) {
+        voxels[cellIndex(x, y, z)] = colour;
+      }
+    }
+  }
+  return voxels;
+}
+
+/** A small, light ball that darts about. */
+export function pebbleShape(colour = 4): Uint8Array {
+  const voxels = new Uint8Array(SHAPE_CELLS);
+  const limit = 2.8 * 2.8;
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        const dx = x - SHAPE_CENTRE;
+        const dy = y - SHAPE_CENTRE;
+        const dz = z - SHAPE_CENTRE;
+        if (dx * dx + dy * dy + dz * dz <= limit) {
+          voxels[cellIndex(x, y, z)] = colour;
+        }
+      }
+    }
+  }
+  return voxels;
+}
+
+/** What a design works out to once measured. */
+export interface ShapeStats {
+  /** How many cubes were used. */
+  cubes: number;
+  /** Distance from the middle to the furthest cube, in stored metres. */
+  radius: number;
+  /** How heavy the ball is, where ONE is the weight of the standard ball. */
+  weight: number;
+  /** How evenly the cubes sit around the middle, from 0 to ONE. */
+  smoothness: number;
+}
+
+/** The measurements of the ball everybody starts with, used as the yardstick. */
+const REFERENCE_CUBES = countCubes(defaultShape());
+
+function countCubes(voxels: Uint8Array): number {
+  let n = 0;
+  for (let i = 0; i < voxels.length; i++) if (voxels[i] !== 0) n++;
+  return n;
+}
+
+/**
+ * Measures a design.
+ *
+ * Smoothness compares the average reach of the outer cubes with the longest
+ * reach: a sphere scores near the top because every part of its surface is
+ * about the same distance from the middle, while a cube or a spiky shape
+ * scores lower and therefore rolls less predictably.
+ */
+export function measureShape(voxels: Uint8Array): ShapeStats {
+  let cubes = 0;
+  let longestSquared = 0;
+  let surfaceCount = 0;
+  let surfaceTotalSquared = 0;
+
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        if (voxels[cellIndex(x, y, z)] === 0) continue;
+        cubes++;
+        // Reach is measured to the far corner of the cube, in half-cube units,
+        // so that everything stays a whole number.
+        const dx = 2 * (x - SHAPE_CENTRE) + (x >= SHAPE_CENTRE ? 1 : -1);
+        const dy = 2 * (y - SHAPE_CENTRE) + (y >= SHAPE_CENTRE ? 1 : -1);
+        const dz = 2 * (z - SHAPE_CENTRE) + (z >= SHAPE_CENTRE ? 1 : -1);
+        const reachSquared = dx * dx + dy * dy + dz * dz;
+        if (reachSquared > longestSquared) longestSquared = reachSquared;
+
+        const exposed =
+          cellAt(voxels, x - 1, y, z) === 0 ||
+          cellAt(voxels, x + 1, y, z) === 0 ||
+          cellAt(voxels, x, y - 1, z) === 0 ||
+          cellAt(voxels, x, y + 1, z) === 0 ||
+          cellAt(voxels, x, y, z - 1) === 0 ||
+          cellAt(voxels, x, y, z + 1) === 0;
+        if (exposed) {
+          surfaceCount++;
+          surfaceTotalSquared += reachSquared;
+        }
+      }
+    }
+  }
+
+  if (cubes === 0) {
+    return { cubes: 0, radius: Math.round(CUBE_METRES * ONE), weight: ONE >> 3, smoothness: ONE };
+  }
+
+  // Half-cube units back into stored metres.
+  const radius = mul(sqrt(longestSquared * ONE), HALF_CUBE);
+  const averageSquared = Math.floor(surfaceTotalSquared / Math.max(1, surfaceCount));
+  const ratio = longestSquared > 0 ? div(averageSquared, longestSquared) : ONE;
+  const smoothness = Math.min(ONE, sqrt(ratio));
+  const weight = Math.max(ONE >> 3, Math.round((cubes * ONE) / REFERENCE_CUBES));
+
+  return { cubes, radius: Math.max(Math.round(CUBE_METRES * ONE), radius), weight, smoothness };
+}
+
+/** A short fingerprint of a design, used to spot when it has changed. */
+export function shapeFingerprint(voxels: Uint8Array): number {
+  let h = 2166136261;
+  for (let i = 0; i < voxels.length; i++) {
+    h ^= voxels[i];
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** Packs a design into text so it can be saved or shared. */
+export function shapeToText(voxels: Uint8Array): string {
+  // Runs of identical slots are stored as "count:value", which keeps a
+  // typical design well under a kilobyte.
+  const parts: string[] = [];
+  let runValue = voxels[0];
+  let runLength = 1;
+  for (let i = 1; i < voxels.length; i++) {
+    if (voxels[i] === runValue) {
+      runLength++;
+    } else {
+      parts.push(`${runLength}:${runValue}`);
+      runValue = voxels[i];
+      runLength = 1;
+    }
+  }
+  parts.push(`${runLength}:${runValue}`);
+  return parts.join(',');
+}
+
+/** Unpacks a design saved by {@link shapeToText}. */
+export function shapeFromText(text: string): Uint8Array {
+  const voxels = new Uint8Array(SHAPE_CELLS);
+  let at = 0;
+  for (const part of text.split(',')) {
+    const [countText, valueText] = part.split(':');
+    const count = Number(countText);
+    const value = Number(valueText);
+    if (!Number.isFinite(count) || !Number.isFinite(value)) continue;
+    for (let i = 0; i < count && at < voxels.length; i++) {
+      voxels[at++] = value & 0xff;
+    }
+  }
+  return voxels;
+}
+
+/** Removes stray cubes that are not joined to the main lump. */
+export function largestConnectedPart(voxels: Uint8Array): Uint8Array {
+  const seen = new Uint8Array(SHAPE_CELLS);
+  const result = new Uint8Array(SHAPE_CELLS);
+  let bestSize = 0;
+  let bestGroup: number[] = [];
+  const queue = new Int32Array(SHAPE_CELLS);
+
+  for (let start = 0; start < SHAPE_CELLS; start++) {
+    if (voxels[start] === 0 || seen[start]) continue;
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    seen[start] = 1;
+    const group: number[] = [];
+    while (head < tail) {
+      const cell = queue[head++];
+      group.push(cell);
+      const z = cell % SHAPE_SIZE;
+      const y = Math.floor(cell / SHAPE_SIZE) % SHAPE_SIZE;
+      const x = Math.floor(cell / (SHAPE_SIZE * SHAPE_SIZE));
+      const neighbours = [
+        [x - 1, y, z],
+        [x + 1, y, z],
+        [x, y - 1, z],
+        [x, y + 1, z],
+        [x, y, z - 1],
+        [x, y, z + 1],
+      ];
+      for (const [nx, ny, nz] of neighbours) {
+        if (!insideShape(nx, ny, nz)) continue;
+        const index = cellIndex(nx, ny, nz);
+        if (seen[index] || voxels[index] === 0) continue;
+        seen[index] = 1;
+        queue[tail++] = index;
+      }
+    }
+    if (group.length > bestSize) {
+      bestSize = group.length;
+      bestGroup = group;
+    }
+  }
+
+  for (const cell of bestGroup) result[cell] = voxels[cell];
+  return result;
+}
