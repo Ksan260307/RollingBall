@@ -73,8 +73,19 @@ const GRAVITY = Math.round(9.80665 * ONE);
  */
 const TILT_SIDEWAYS = Math.round(8.2 * ONE);
 
-/** The same, for dragging forwards and back. */
+/** The same, for dragging forwards. */
 const TILT_AHEAD = Math.round(4.6 * ONE);
+
+/** How hard dragging back slows the ball down. */
+const BRAKING = Math.round(6.0 * ONE);
+
+/**
+ * How far in from the start line the ball is placed.
+ *
+ * The floor stops at the start line, exactly where it is drawn, so the ball
+ * is set down a little way inside it rather than balanced on the very edge.
+ */
+const START_INSET = Math.round(1.2 * ONE);
 
 /** How much steering still works while the ball is off the ground. */
 const AIR_CONTROL = Math.round(2.2 * ONE);
@@ -101,6 +112,15 @@ const WALL_BOUNCE = Math.round(0.45 * ONE);
 
 /** How much a wall scrubs at the ball as it slides along it. */
 const WALL_GRIP = Math.round(0.4 * ONE);
+
+/**
+ * How tall the low walls stand, matching the height they are drawn at.
+ *
+ * A wall only stops the ball while the ball is low enough to hit it. Without
+ * this the walls would carry on invisibly into the sky, and a ball sailing
+ * well above one would still be shoved back as though it had struck it.
+ */
+const WALL_HEIGHT = Math.round(0.55 * ONE);
 
 /** How much the air slows the ball, per unit of speed. */
 const AIR_RESISTANCE = Math.round(0.0062 * ONE);
@@ -220,11 +240,27 @@ interface SceneryRegion {
   count: number;
   note: GroupSummary;
   awake: boolean;
+  /** Which side of the course this group sits on: -1 for left, 1 for right. */
+  facing: number;
+  /** Which point of the course it is beside. */
+  pointIndex: number;
 }
 
 const ATTENTION_RANGE = Math.round(46 * ONE);
 const REGION_SPACING = 8; // metres
 const SCENERY_LIMIT = 320;
+
+/** How far past the edge of the floor the scenery starts. */
+const SIDE_CLEARANCE = Math.round(3.4 * ONE);
+
+/** How much further out than that it may wander. */
+const SIDE_SPREAD = Math.round(5.0 * ONE);
+
+/** How far the members of one group spread around their group. */
+const MEMBER_SPREAD = Math.round(1.8 * ONE);
+
+/** How far past the edge of the floor a collectable light sits. */
+const ORB_OFFSET = Math.round(1.1 * ONE);
 
 /** Working space for the rolling maths, reused so nothing is thrown away. */
 const slipScratch: Triple = triple();
@@ -331,9 +367,12 @@ export class World {
       const offset =
         this.players > 1 ? Math.round((p - (this.players - 1) / 2) * 1.6 * ONE) : 0;
       const lift = this.feel.radius;
-      this.x[p] = c.startX + mul(c.rightX[0], offset) + mul(c.upX[0], lift);
-      this.y[p] = c.startY + mul(c.rightY[0], offset) + mul(c.upY[0], lift);
-      this.z[p] = c.startZ + mul(c.rightZ[0], offset) + mul(c.upZ[0], lift);
+      this.x[p] =
+        c.startX + mul(c.rightX[0], offset) + mul(c.upX[0], lift) + mul(c.forwardX[0], START_INSET);
+      this.y[p] =
+        c.startY + mul(c.rightY[0], offset) + mul(c.upY[0], lift) + mul(c.forwardY[0], START_INSET);
+      this.z[p] =
+        c.startZ + mul(c.rightZ[0], offset) + mul(c.upZ[0], lift) + mul(c.forwardZ[0], START_INSET);
       this.velocityX[p] = 0;
       this.velocityY[p] = 0;
       this.velocityZ[p] = 0;
@@ -352,9 +391,13 @@ export class World {
   }
 
   /**
-   * Scatters scenery along the course. Each region is described by a short
-   * note, and the note is what actually creates the members, so a region can
-   * be thrown away and rebuilt later without anything shifting.
+   * Scatters scenery along the course, always to the side of it and never
+   * over it. The way ahead is kept completely clear: nothing the player has
+   * to steer around, and nothing hanging at ball height over the floor.
+   *
+   * Each region is described by a short note, and the note is what actually
+   * creates the members, so a region can be thrown away and rebuilt later
+   * without anything shifting.
    */
   private growScenery(): void {
     const c = this.course;
@@ -365,15 +408,17 @@ export class World {
       const population = 3 + rng.below(4);
       if (this.scenery.count + population > this.scenery.capacity) break;
 
-      const distance = Math.round(((r + 0.5) * REGION_SPACING) * ONE);
-      const pointIndex = Math.min(
-        c.count - 1,
-        Math.max(0, Math.round(distance / ONE / 2)),
-      );
-      const side = (rng.signedUnit() * (c.halfWidth[pointIndex] + Math.round(4 * ONE))) >> 16;
+      const distance = Math.round((r + 0.5) * REGION_SPACING * ONE);
+      const pointIndex = Math.min(c.count - 1, Math.max(0, Math.round(distance / ONE / 2)));
+
+      // Well clear of the edge of the floor, on one side or the other.
+      const facing = rng.below(2) === 0 ? -1 : 1;
+      const clearance = c.halfWidth[pointIndex] + SIDE_CLEARANCE;
+      const side = facing * (clearance + ((rng.unit() * SIDE_SPREAD) >> 16));
+
       const note: GroupSummary = {
         x: c.x[pointIndex] + mul(c.rightX[pointIndex], side),
-        y: c.y[pointIndex] + mul(c.upY[pointIndex], Math.round(1.2 * ONE)),
+        y: c.y[pointIndex] + mul(c.upY[pointIndex], Math.round(0.9 * ONE)),
         z: c.z[pointIndex] + mul(c.rightZ[pointIndex], side),
         population,
         energy: 30000 + rng.below(20000),
@@ -386,16 +431,36 @@ export class World {
       for (let n = 0; n < population; n++) {
         this.scenery.add(0, 0, 0, Kind.Orb, 0, 0, note.energy);
       }
-      restoreGroup(this.scenery, from, population, note, this.seed, Math.round(3.5 * ONE));
-      // Give each region one collectable orb and make the rest decoration.
+      // Give each region one collectable light and make the rest decoration.
       for (let n = 0; n < population; n++) {
         const slot = from + n;
         const looksRng = new Generator(mix(this.seed, slot, 0x0b1e));
         this.scenery.setKind(slot, n === 0 ? Kind.Orb : 1 + looksRng.below(3));
         this.scenery.setLooks(slot, looksRng.below(256));
       }
-      this.regions.push({ from, count: population, note, awake: true });
+      const region: SceneryRegion = { from, count: population, note, awake: true, facing, pointIndex };
+      this.placeRegion(region);
+      this.regions.push(region);
     }
+  }
+
+  /**
+   * Puts a region back where it belongs, whether it is being made for the
+   * first time or woken up again after being set aside.
+   */
+  private placeRegion(region: SceneryRegion): void {
+    restoreGroup(this.scenery, region.from, region.count, region.note, this.seed, MEMBER_SPREAD);
+
+    // The collectable light is pulled in to just past the edge of the floor.
+    // It is close enough to pick up by riding the edge, and far enough out
+    // that it is never in the way of somebody taking the straight line.
+    const c = this.course;
+    const i = region.pointIndex;
+    const side = region.facing * (c.halfWidth[i] + ORB_OFFSET);
+    const slot = region.from;
+    this.scenery.x[slot] = c.x[i] + mul(c.rightX[i], side);
+    this.scenery.y[slot] = c.y[i] + mul(c.upY[i], Math.round(0.6 * ONE));
+    this.scenery.z[slot] = c.z[i] + mul(c.rightZ[i], side);
   }
 
   /** How many scenery pieces did a full update on the last step. */
@@ -509,10 +574,15 @@ export class World {
     const upZ = c.upZ[i];
 
     const overGap = (where.flags & PointFlag.Gap) !== 0;
+    const pastTheEnds = where.pastEnd > 0;
     const gapFromFloor = where.height - this.feel.radius;
     const withinFloor = abs(where.sideways) <= where.halfWidth;
     const touching =
-      !overGap && withinFloor && gapFromFloor <= CONTACT_SLACK && gapFromFloor > -CATCH_DEPTH;
+      !overGap &&
+      !pastTheEnds &&
+      withinFloor &&
+      gapFromFloor <= CONTACT_SLACK &&
+      gapFromFloor > -CATCH_DEPTH;
     const floor = FLOORS[where.surface] ?? FLOORS[Surface.Normal];
 
     // The player tips the course; gravity does the rest of the work. Off the
@@ -521,11 +591,36 @@ export class World {
     const sideways = touching
       ? mul(TILT_SIDEWAYS, controls.steer)
       : mul(AIR_CONTROL, controls.steer);
-    const ahead = touching ? mul(TILT_AHEAD, controls.push) : 0;
+    // Dragging forwards tips the course down the hill. Dragging back does not
+    // tip it the other way: it brakes. A downhill run only goes one way, and
+    // being able to drive the ball back out through the start line was never
+    // meant to be part of it.
+    const ahead = touching && controls.push > 0 ? mul(TILT_AHEAD, controls.push) : 0;
 
     let accelX = mul(rightX, sideways) + mul(forwardX, ahead);
     let accelY = -GRAVITY + mul(rightY, sideways) + mul(forwardY, ahead);
     let accelZ = mul(rightZ, sideways) + mul(forwardZ, ahead);
+
+    if (touching && controls.push < 0) {
+      // Braking, and never harder than it takes to come to a stop, so the
+      // ball cannot be driven backwards down the course.
+      const alongCourse = dot(
+        this.velocityX[player],
+        this.velocityY[player],
+        this.velocityZ[player],
+        forwardX,
+        forwardY,
+        forwardZ,
+      );
+      if (alongCourse > 0) {
+        const wanted = mul(BRAKING, -controls.push);
+        const enoughToStop = alongCourse * STEPS_PER_SECOND;
+        const braking = wanted < enoughToStop ? wanted : enoughToStop;
+        accelX -= mul(forwardX, braking);
+        accelY -= mul(forwardY, braking);
+        accelZ -= mul(forwardZ, braking);
+      }
+    }
 
     // A breeze crossing the course, read straight from the surroundings.
     if (this.breeze > 0) {
@@ -762,6 +857,9 @@ export class World {
     const i = after.point;
     const limit = after.halfWidth - this.feel.radius;
     if (abs(after.sideways) <= limit) return;
+    // Sailing over the top of the wall rather than into it.
+    if (after.height - this.feel.radius > WALL_HEIGHT) return;
+    if (after.pastEnd > 0) return;
 
     const overshoot = abs(after.sideways) - limit;
     const direction = sign(after.sideways);
@@ -797,7 +895,9 @@ export class World {
   }
 
   private gatherOrbs(player: number): void {
-    const reach = this.feel.radius + Math.round(0.75 * ONE);
+    // The lights sit just past the edge of the floor, so the reach has to be
+    // long enough to pick one up by riding the edge, and no longer.
+    const reach = this.feel.radius + Math.round(1.4 * ONE);
     const reachSquared = reach * reach;
     const bx = this.x[player];
     const by = this.y[player];
@@ -837,6 +937,7 @@ export class World {
     const overGap = (where.flags & PointFlag.Gap) !== 0;
     this.grounded[player] =
       !overGap &&
+      where.pastEnd === 0 &&
       abs(where.sideways) <= where.halfWidth &&
       this.aboveFloor[player] <= CONTACT_SLACK &&
       this.aboveFloor[player] > -CATCH_DEPTH
@@ -881,14 +982,7 @@ export class World {
       const shouldBeAwake = distance <= ATTENTION_RANGE;
       if (shouldBeAwake === region.awake) continue;
       if (shouldBeAwake) {
-        restoreGroup(
-          this.scenery,
-          region.from,
-          region.count,
-          region.note,
-          this.seed,
-          Math.round(3.5 * ONE),
-        );
+        this.placeRegion(region);
         region.awake = true;
       } else {
         // Keep only the summary; the members themselves stop being updated.

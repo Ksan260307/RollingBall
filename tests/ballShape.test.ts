@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PALETTE,
   SHAPE_CELLS,
+  SHAPE_CENTRE,
   SHAPE_SIZE,
   cellAt,
   cellIndex,
@@ -56,11 +57,90 @@ describe('the ready-made shapes', () => {
     expect(stats.weight).toBe(ONE);
   });
 
-  it('paints the ball the colour it was asked for', () => {
+  it('paints the ball mostly the colour it was asked for', () => {
     const green = defaultShape(4);
-    const used = new Set([...green].filter((v) => v !== 0));
-    expect([...used]).toEqual([4]);
+    const counts = new Map<number, number>();
+    for (const slot of green) if (slot !== 0) counts.set(slot, (counts.get(slot) ?? 0) + 1);
+    const ordered = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    expect(ordered[0][0]).toBe(4);
     expect(PALETTE[4]).toBeTruthy();
+    // The rest is the pattern that shows which way the ball is turning.
+    expect(counts.size).toBeGreaterThan(1);
+  });
+
+  it('is lopsided enough to show which way it is turning', () => {
+    // A ball of cubes is the same shape after a quarter turn. Painted one
+    // flat colour, its pattern would come round four times a revolution,
+    // fast enough at speed to outrun the screen and appear to run backwards.
+    // A lopsided pattern gives one landmark per turn instead.
+    for (const voxels of [defaultShape(), cubeShape(), pebbleShape()]) {
+      let differing = 0;
+      let filled = 0;
+      for (let x = 0; x < SHAPE_SIZE; x++) {
+        for (let y = 0; y < SHAPE_SIZE; y++) {
+          for (let z = 0; z < SHAPE_SIZE; z++) {
+            const here = voxels[cellIndex(x, y, z)];
+            if (here === 0) continue;
+            filled++;
+            // A quarter turn about the axis the ball rolls on.
+            const turnedY = SHAPE_CENTRE + (z - SHAPE_CENTRE);
+            const turnedZ = SHAPE_CENTRE - (y - SHAPE_CENTRE);
+            if (here !== voxels[cellIndex(x, turnedY, turnedZ)]) differing++;
+          }
+        }
+      }
+      expect(differing / filled).toBeGreaterThan(0.25);
+    }
+  });
+
+  it('keeps the pattern out of the way of how the ball rolls', () => {
+    // Colour must never change the handling: only which cubes are filled in.
+    const plain = defaultShape();
+    const stripped = Uint8Array.from(plain, (slot) => (slot === 0 ? 0 : 7));
+    const a = measureShape(plain);
+    const b = measureShape(stripped);
+    expect(b.radius).toBe(a.radius);
+    expect(b.weight).toBe(a.weight);
+    expect(b.spinResistance).toBe(a.spinResistance);
+    expect(b.smoothness).toBe(a.smoothness);
+  });
+
+  it('rests on its body, not on a cube poking out on its own', () => {
+    // A ball with a whisker or two is a normal thing to build in the
+    // workshop. If a single sticking-out cube set the resting height, the
+    // whole ball would hover above the floor and turn too slowly for the
+    // size it appears to be, which looks exactly like sliding.
+    const body = new Uint8Array(SHAPE_CELLS);
+    for (let x = 0; x < SHAPE_SIZE; x++) {
+      for (let y = 0; y < SHAPE_SIZE; y++) {
+        for (let z = 0; z < SHAPE_SIZE; z++) {
+          const dx = x - SHAPE_CENTRE;
+          const dy = y - SHAPE_CENTRE;
+          const dz = z - SHAPE_CENTRE;
+          if (dx * dx + dy * dy + dz * dz <= 3.4 * 3.4) body[cellIndex(x, y, z)] = 5;
+        }
+      }
+    }
+    const plain = measureShape(body);
+
+    const whiskered = Uint8Array.from(body);
+    whiskered[cellIndex(0, 4, 4)] = 4;
+    whiskered[cellIndex(4, 8, 4)] = 4;
+    whiskered[cellIndex(8, 4, 4)] = 4;
+    const bumpy = measureShape(whiskered);
+
+    expect(bumpy.radius).toBe(plain.radius);
+    // The whiskers do reach further out, and that is still worth knowing.
+    expect(bumpy.reach).toBeGreaterThan(plain.reach);
+    // Handling stays where it was rather than being thrown off by them.
+    expect(toNumber(bumpy.spinResistance)).toBeCloseTo(toNumber(plain.spinResistance), 1);
+  });
+
+  it('still uses a lone cube when there is nothing else to rest on', () => {
+    const single = new Uint8Array(SHAPE_CELLS);
+    single[cellIndex(4, 4, 4)] = 3;
+    const stats = measureShape(single);
+    expect(toNumber(stats.radius)).toBeCloseTo(0.05, 3);
   });
 
   it('makes a box less round than a ball', () => {

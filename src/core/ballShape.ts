@@ -62,6 +62,52 @@ export function cellAt(voxels: Uint8Array, x: number, y: number, z: number): num
   return voxels[cellIndex(x, y, z)];
 }
 
+/**
+ * Paints a lopsided pattern over a finished shape.
+ *
+ * A ball built out of cubes looks exactly the same after a quarter turn, so
+ * painting it one flat colour leaves the eye nothing to follow but a pattern
+ * that comes round four times per revolution. At speed that repeat outruns
+ * the screen refresh, and the ball appears to turn backwards, in just the way
+ * spoked wheels do on film.
+ *
+ * Two off-centre patches give the eye a single landmark per revolution
+ * instead. That is slow enough to read clearly even on a slow display, so
+ * the direction the ball is turning is never in doubt.
+ *
+ * Only the colours change, so nothing here affects how the ball rolls.
+ */
+function paintPattern(voxels: Uint8Array, colour: number): void {
+  const patchColour = colour === 8 ? 9 : 8;
+  const spotColour = colour === 1 ? 3 : 1;
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        const index = cellIndex(x, y, z);
+        if (voxels[index] === 0) continue;
+        voxels[index] = colour;
+
+        const dx = x - SHAPE_CENTRE;
+        const dy = y - SHAPE_CENTRE;
+        const dz = z - SHAPE_CENTRE;
+        const lengthSquared = dx * dx + dy * dy + dz * dz;
+        if (lengthSquared === 0) continue;
+
+        // Compared as squares, so no square roots are needed.
+        const towardsPatch = dx * 0.31 + dy * 0.7 + dz * 0.64;
+        if (towardsPatch > 0 && towardsPatch * towardsPatch > 0.34 * lengthSquared) {
+          voxels[index] = patchColour;
+          continue;
+        }
+        const towardsSpot = dx * -0.58 + dy * -0.49 + dz * 0.65;
+        if (towardsSpot > 0 && towardsSpot * towardsSpot > 0.55 * lengthSquared) {
+          voxels[index] = spotColour;
+        }
+      }
+    }
+  }
+}
+
 /** The ball everybody starts with: as round as the cubes allow. */
 export function defaultShape(colour = 5): Uint8Array {
   const voxels = new Uint8Array(SHAPE_CELLS);
@@ -78,6 +124,7 @@ export function defaultShape(colour = 5): Uint8Array {
       }
     }
   }
+  paintPattern(voxels, colour);
   return voxels;
 }
 
@@ -91,6 +138,7 @@ export function cubeShape(colour = 2): Uint8Array {
       }
     }
   }
+  paintPattern(voxels, colour);
   return voxels;
 }
 
@@ -110,6 +158,7 @@ export function pebbleShape(colour = 4): Uint8Array {
       }
     }
   }
+  paintPattern(voxels, colour);
   return voxels;
 }
 
@@ -117,7 +166,16 @@ export function pebbleShape(colour = 4): Uint8Array {
 export interface ShapeStats {
   /** How many cubes were used. */
   cubes: number;
-  /** The distance the ball rests on, from its middle down to the floor. */
+  /**
+   * How high the ball sits when it is resting on the floor, measured from
+   * its middle down to its outside.
+   *
+   * This is the distance to the flat outside of the block, not to its
+   * furthest corner, because that is where the ball actually meets the
+   * ground. Using the corner instead would leave the ball hovering a
+   * centimetre or two above the floor and turning as though it were bigger
+   * than it looks, which reads as sliding rather than rolling.
+   */
   radius: number;
   /** How heavy the ball is, where ONE is the weight of the standard ball. */
   weight: number;
@@ -159,6 +217,12 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
   let surfaceCount = 0;
   let surfaceTotalSquared = 0;
   let centreTotalSquared = 0;
+  // How far the solid body of the block reaches out, in half-cube steps.
+  // Single cubes poking out on their own are left out of this: the ball
+  // rests on its body, not on its whiskers.
+  let outermost = 0;
+  // The same measured over everything, used only if there is no body at all.
+  let outermostIncludingSpikes = 0;
 
   for (let x = 0; x < SHAPE_SIZE; x++) {
     for (let y = 0; y < SHAPE_SIZE; y++) {
@@ -179,6 +243,26 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
         const midY = 2 * (y - SHAPE_CENTRE);
         const midZ = 2 * (z - SHAPE_CENTRE);
         centreTotalSquared += midX * midX + midY * midY + midZ * midZ;
+
+        // The outer faces of this cube, again in half-cube steps.
+        const faceX = Math.abs(midX) + 1;
+        const faceY = Math.abs(midY) + 1;
+        const faceZ = Math.abs(midZ) + 1;
+        const furthestFace = Math.max(faceX, faceY, faceZ);
+        if (furthestFace > outermostIncludingSpikes) outermostIncludingSpikes = furthestFace;
+
+        // A cube joined to the rest on at least three sides is part of the
+        // body. One hanging off a corner is a whisker, and letting a whisker
+        // set the resting height would hold the whole ball off the floor and
+        // make it turn too slowly for the size it looks.
+        const neighbours =
+          (cellAt(voxels, x - 1, y, z) !== 0 ? 1 : 0) +
+          (cellAt(voxels, x + 1, y, z) !== 0 ? 1 : 0) +
+          (cellAt(voxels, x, y - 1, z) !== 0 ? 1 : 0) +
+          (cellAt(voxels, x, y + 1, z) !== 0 ? 1 : 0) +
+          (cellAt(voxels, x, y, z - 1) !== 0 ? 1 : 0) +
+          (cellAt(voxels, x, y, z + 1) !== 0 ? 1 : 0);
+        if (neighbours >= 3 && furthestFace > outermost) outermost = furthestFace;
 
         const exposed =
           cellAt(voxels, x - 1, y, z) === 0 ||
@@ -207,11 +291,15 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
     };
   }
 
-  // The ball rests on its typical outside distance rather than on its single
-  // furthest corner, which is what keeps a lumpy design sitting on the floor
-  // instead of hovering above it.
+  // The ball rests on the flat outside of its body, so that is the distance
+  // the physics uses as well: the drawn ball then sits on the floor and turns
+  // at the rate its size calls for.
+  if (outermost === 0) outermost = outermostIncludingSpikes;
   const averageSquared = div(surfaceTotalSquared, Math.max(1, surfaceCount));
-  const radius = mul(sqrt(averageSquared), HALF_CUBE);
+  // Worked out from the cube size in one go rather than by adding up half
+  // cubes, so the answer lands as close to the drawn shape as the numbers
+  // allow: a few thousandths of a millimetre, rather than a few hundredths.
+  const radius = Math.round((outermost / 2) * CUBE_METRES * ONE);
   const reach = mul(sqrt(longestSquared * ONE), HALF_CUBE);
 
   const ratio = longestSquared > 0 ? div(averageSquared, longestSquared * ONE) : ONE;
@@ -224,8 +312,9 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
   // for a solid ball, about 0.67 for a hollow shell.
   const meanCentreSquared = div(centreTotalSquared, cubes);
   const spread = mul(TWO_THIRDS, meanCentreSquared + ONE);
+  const restingSquared = outermost * outermost * ONE;
   const spinResistance = clamp(
-    averageSquared > 0 ? div(spread, averageSquared) : Math.round(0.4 * ONE),
+    restingSquared > 0 ? div(spread, restingSquared) : Math.round(0.4 * ONE),
     Math.round(0.12 * ONE),
     Math.round(1.4 * ONE),
   );

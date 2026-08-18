@@ -54,6 +54,21 @@ const LOOK_AHEAD = 6.0;
 /** How many sparkle pieces can be in the air at once. */
 const SPARKLE_COUNT = 48;
 
+/**
+ * Whether the drawn ball rolls the opposite way along the course from the
+ * way the rules roll it.
+ *
+ * Only rolling along the course is affected. Rolling across it, when the ball
+ * is pushed sideways, is left exactly as the rules work it out.
+ *
+ * The rules themselves are untouched either way: they hold the point touching
+ * the ground still, which is what rolling means, and every calculation about
+ * grip, skidding and acceleration is built on that. This is a choice about
+ * the picture alone. Set it to false to draw the ball rolling the way the
+ * rules roll it.
+ */
+const FLIP_ROLLING_ALONG_COURSE = true;
+
 const scratchPosition = new Vector3();
 const scratchTarget = new Vector3();
 const scratchMatrix = new Matrix4();
@@ -455,16 +470,39 @@ export class GameView {
   }
 
   /**
-   * Turns the ball by its own turning speed.
+   * Turns the ball by its own turning speed, in the direction set by
+   * {@link DRAWN_SPIN_DIRECTION}.
    *
-   * The rules work out the spin properly, so this simply follows it. That is
-   * why a skid looks like a skid: on ice the ball slides on without the
-   * surface pattern keeping up, because it genuinely is not rolling.
+   * The speed still comes straight from the rules, so a skid still looks
+   * like a skid: on ice the ball slides on without its surface keeping pace
+   * with the ground, because it genuinely is not rolling.
    */
   private spinBall(world: World, delta: number): void {
-    const wx = toMetres(world.spinX[0]);
-    const wy = toMetres(world.spinY[0]);
-    const wz = toMetres(world.spinZ[0]);
+    let wx = toMetres(world.spinX[0]);
+    let wy = toMetres(world.spinY[0]);
+    let wz = toMetres(world.spinZ[0]);
+
+    if (FLIP_ROLLING_ALONG_COURSE) {
+      // Rolling along the course is a turn about the sideways axis, and
+      // rolling across it is a turn about the forward axis. Turning the
+      // sideways part around leaves rolling across the course alone.
+      const course = world.course;
+      const point = Math.min(course.count - 1, Math.max(0, world.hintFor(0)));
+      let ax = toMetres(course.rightX[point]);
+      let ay = toMetres(course.rightY[point]);
+      let az = toMetres(course.rightZ[point]);
+      const length = Math.sqrt(ax * ax + ay * ay + az * az);
+      if (length > 1e-6) {
+        ax /= length;
+        ay /= length;
+        az /= length;
+        const along = wx * ax + wy * ay + wz * az;
+        wx -= 2 * along * ax;
+        wy -= 2 * along * ay;
+        wz -= 2 * along * az;
+      }
+    }
+
     const rate = Math.sqrt(wx * wx + wy * wy + wz * wz);
     if (rate > 1e-5) {
       scratchAxis.set(wx / rate, wy / rate, wz / rate);

@@ -14,6 +14,8 @@ import {
   defaultShape,
   pebbleShape,
 } from '../src/core/ballShape';
+import { measureShape } from '../src/core/ballShape';
+import { ONE, toNumber } from '../src/core/fixed';
 import { buildCourseMesh, disposeCourseMesh, toMetres } from '../src/render/courseMesh';
 import { buildBallGeometry } from '../src/render/ballMesh';
 import { STAGES, courseFor } from '../src/game/stages';
@@ -148,6 +150,26 @@ describe('building the ball to look at', () => {
     if (box) {
       expect(Math.abs(box.min.x + box.max.x)).toBeLessThan(0.001);
       expect(Math.abs(box.min.y + box.max.y)).toBeLessThan(0.001);
+    }
+  });
+
+  it('sits exactly on the floor, so it rolls instead of hovering', () => {
+    // The rules hold the middle of the ball one radius above the floor. If
+    // the drawn ball did not reach down exactly that far it would float, and
+    // it would turn at the wrong rate for the size it appears to be, which
+    // reads as sliding rather than rolling.
+    for (const voxels of [defaultShape(), cubeShape(), pebbleShape()]) {
+      const built = buildBallGeometry(voxels);
+      built.geometry.computeBoundingBox();
+      const box = built.geometry.boundingBox;
+      expect(box).not.toBeNull();
+      if (!box) continue;
+      const resting = toNumber(measureShape(voxels).radius);
+      // They agree to within the smallest step the rules can store.
+      expect(-box.min.y).toBeCloseTo(resting, 4);
+      expect(box.max.y).toBeCloseTo(resting, 4);
+      expect(-box.min.x).toBeLessThanOrEqual(resting + 1 / ONE);
+      expect(-box.min.z).toBeLessThanOrEqual(resting + 1 / ONE);
     }
   });
 

@@ -6,8 +6,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { Surface, SurfaceValue, buildCourse } from '../src/core/course';
-import { ONE, toNumber } from '../src/core/fixed';
+import { Surface, SurfaceValue, buildCourse, placeOnCourse } from '../src/core/course';
+import { ONE, div, mul, toNumber } from '../src/core/fixed';
 import {
   SHAPE_CELLS,
   SHAPE_CENTRE,
@@ -18,6 +18,7 @@ import {
   measureShape,
 } from '../src/core/ballShape';
 import { packControls } from '../src/core/input';
+import { crossInto, dot, magnitude, triple } from '../src/core/rolling';
 import { RunState, STEPS_PER_SECOND, World, ballFeelFrom } from '../src/core/simulation';
 
 const GRAVITY = 9.80665;
@@ -112,12 +113,185 @@ describe('a ball rolling down a slope', () => {
     expect(world.spinFor(0)).toBe(0);
   });
 
+  it('turns forwards, with the top of the ball running ahead', () => {
+    // The direction the ball turns is the one thing a player watches, so it
+    // is worth pinning down rather than trusting. On a ball rolling forwards
+    // the top of it moves the same way the ball is going, at the travelling
+    // speed, while the point touching the ground stands still.
+    const stats = measureShape(defaultShape());
+    const world = slopeWorld(8);
+    roll(world, STEPS_PER_SECOND * 3);
+
+    const speed = world.speedFor(0);
+    expect(toNumber(speed)).toBeGreaterThan(2);
+    const point = world.hintFor(0);
+    const course = world.course;
+
+    // How the very top of the ball moves, compared with the ball itself.
+    const armX = mul(course.upX[point], stats.radius);
+    const armY = mul(course.upY[point], stats.radius);
+    const armZ = mul(course.upZ[point], stats.radius);
+    const top = crossInto(triple(), world.spinX[0], world.spinY[0], world.spinZ[0], armX, armY, armZ);
+
+    const alongTravel = div(
+      dot(top.x, top.y, top.z, world.velocityX[0], world.velocityY[0], world.velocityZ[0]),
+      speed,
+    );
+    // Forwards, and at very nearly the speed the ball is travelling.
+    expect(alongTravel).toBeGreaterThan(0);
+    expect(toNumber(alongTravel)).toBeCloseTo(toNumber(speed), 0);
+    expect(toNumber(magnitude(top.x, top.y, top.z))).toBeCloseTo(toNumber(speed), 0);
+  });
+
+  it('holds the point touching the ground still', () => {
+    const world = slopeWorld(8);
+    roll(world, STEPS_PER_SECOND * 3);
+    // If the ball turned the wrong way this would come out at twice the
+    // travelling speed rather than near nothing.
+    expect(toNumber(world.skidFor(0))).toBeLessThan(0.05);
+    expect(toNumber(world.speedFor(0))).toBeGreaterThan(2);
+  });
+
   it('turns the way it is going, not some other way', () => {
     const world = slopeWorld(8);
     roll(world, STEPS_PER_SECOND * 2);
     // Heading along the course means turning about the sideways direction.
     expect(Math.abs(toNumber(world.spinX[0]))).toBeGreaterThan(1);
     expect(Math.abs(toNumber(world.spinZ[0]))).toBeLessThan(1);
+  });
+});
+
+describe('the floor stops where it is drawn', () => {
+  it('does not carry on behind the start line', () => {
+    const course = buildCourse([{ length: 60, drop: 8, width: 10, walls: true }]);
+    const world = new World({
+      course,
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    // Set the ball down well behind the start line, where no floor is drawn.
+    const back = Math.round(6 * ONE);
+    world.x[0] = course.startX - mul(course.forwardX[0], back);
+    world.y[0] = course.startY - mul(course.forwardY[0], back);
+    world.z[0] = course.startZ - mul(course.forwardZ[0], back);
+
+    roll(world, STEPS_PER_SECOND * 6);
+    // It must drop, not roll away on a surface that is not there.
+    expect(world.grounded[0]).toBe(0);
+    expect(world.state[0]).toBe(RunState.Fallen);
+  });
+
+  it('knows the floor has run out at either end', () => {
+    const course = buildCourse([{ length: 60, drop: 8, width: 10, walls: true }]);
+    const beyond = Math.round(6 * ONE);
+    const last = course.count - 1;
+
+    const onIt = placeOnCourse(course, course.x[5], course.y[5], course.z[5], 5);
+    expect(onIt.pastEnd).toBe(0);
+
+    const behind = placeOnCourse(
+      course,
+      course.startX - mul(course.forwardX[0], beyond),
+      course.startY - mul(course.forwardY[0], beyond),
+      course.startZ - mul(course.forwardZ[0], beyond),
+      0,
+    );
+    expect(toNumber(behind.pastEnd)).toBeCloseTo(6, 0);
+
+    const ahead = placeOnCourse(
+      course,
+      course.x[last] + mul(course.forwardX[last], beyond),
+      course.y[last] + mul(course.forwardY[last], beyond),
+      course.z[last] + mul(course.forwardZ[last], beyond),
+      last,
+    );
+    expect(toNumber(ahead.pastEnd)).toBeCloseTo(6, 0);
+  });
+
+  it('lets a ball sail over a wall instead of stopping it in mid-air', () => {
+    // The walls are low ones, and they are drawn that way. They should not
+    // carry on invisibly into the sky.
+    const course = buildCourse([{ length: 60, drop: 0, width: 8, walls: true }]);
+    const world = new World({
+      course,
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    const point = 5;
+    const outside = Math.round(6 * ONE);
+    const high = Math.round(4 * ONE);
+    world.x[0] =
+      course.x[point] + mul(course.rightX[point], outside) + mul(course.upX[point], high);
+    world.y[0] =
+      course.y[point] + mul(course.rightY[point], outside) + mul(course.upY[point], high);
+    world.z[0] =
+      course.z[point] + mul(course.rightZ[point], outside) + mul(course.upZ[point], high);
+
+    world.advance([NEUTRAL]);
+    expect(world.grounded[0]).toBe(0);
+    // Still outside the course, dropping, rather than shoved back over it.
+    expect(toNumber(Math.abs(world.sideways[0]))).toBeGreaterThan(4);
+  });
+
+  it('still keeps a rolling ball inside the walls', () => {
+    const world = slopeWorld(8);
+    const hardRight = packControls({ steer: ONE, push: 0, buttons: 0 });
+    roll(world, STEPS_PER_SECOND * 6, hardRight);
+    expect(world.state[0]).toBe(RunState.Rolling);
+    expect(toNumber(Math.abs(world.sideways[0]))).toBeLessThan(7.1);
+  });
+
+  it('holds the ball up everywhere the floor really is', () => {
+    const world = slopeWorld(8);
+    for (let i = 0; i < STEPS_PER_SECOND * 6; i++) {
+      world.advance([NEUTRAL]);
+      expect(world.state[0]).toBe(RunState.Rolling);
+    }
+    expect(world.grounded[0]).toBe(1);
+  });
+});
+
+describe('the controls only send the ball one way', () => {
+  it('brakes to a stop when dragged back, and no further', () => {
+    const course = buildCourse([{ length: 60, drop: 8, width: 10, walls: true }]);
+    const world = new World({
+      course,
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    const fullBrake = packControls({ steer: 0, push: -ONE, buttons: 0 });
+
+    let leastTravelled = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < STEPS_PER_SECOND * 20; i++) {
+      world.advance([fullBrake]);
+      leastTravelled = Math.min(leastTravelled, world.travelled[0]);
+      // Never driven back out through the start line.
+      expect(world.travelled[0]).toBeGreaterThanOrEqual(0);
+    }
+    // It comes to a near stop rather than reversing.
+    expect(toNumber(world.speedFor(0))).toBeLessThan(0.5);
+    expect(world.state[0]).toBe(RunState.Rolling);
+    expect(toNumber(leastTravelled)).toBeGreaterThan(0.5);
+  });
+
+  it('still lets the player push on down the hill', () => {
+    const pushed = slopeWorld(8);
+    const coasting = slopeWorld(8);
+    roll(pushed, STEPS_PER_SECOND * 3, packControls({ steer: 0, push: ONE, buttons: 0 }));
+    roll(coasting, STEPS_PER_SECOND * 3);
+    expect(pushed.travelled[0]).toBeGreaterThan(coasting.travelled[0]);
+  });
+
+  it('starts the ball inside the floor, not balanced on its edge', () => {
+    const world = slopeWorld(8);
+    expect(world.travelled[0]).toBe(0);
+    world.advance([NEUTRAL]);
+    // One step in, it is comfortably on the floor rather than over the edge.
+    expect(world.grounded[0]).toBe(1);
+    expect(toNumber(world.travelled[0])).toBeGreaterThan(0.5);
   });
 });
 

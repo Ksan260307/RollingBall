@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ONE, toNumber } from '../src/core/fixed';
-import { PointFlag } from '../src/core/course';
+import { ONE, abs, toNumber } from '../src/core/fixed';
+import { Course, PointFlag, placeOnCourse } from '../src/core/course';
 import { cubeShape, defaultShape, measureShape, pebbleShape } from '../src/core/ballShape';
 import { RunState, World } from '../src/core/simulation';
 import { STAGES, courseFor, courseMetres, stageById } from '../src/game/stages';
@@ -85,6 +85,51 @@ describe('how each course is laid out', () => {
       }
     }
   });
+});
+
+/** The point of the chain nearest a spot, searched from end to end. */
+function nearestPoint(course: Course, x: number, y: number, z: number): number {
+  let best = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < course.count; i++) {
+    const dx = (x - course.x[i]) / ONE;
+    const dy = (y - course.y[i]) / ONE;
+    const dz = (z - course.z[i]) / ONE;
+    const distance = dx * dx + dy * dy + dz * dz;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = i;
+    }
+  }
+  return best;
+}
+
+describe('the way ahead is kept clear', () => {
+  for (const stage of STAGES) {
+    it(`${stage.name} has nothing standing on the floor itself`, () => {
+      const course = courseFor(stage);
+      const world = new World({
+        course,
+        seed: stage.seed,
+        ball: measureShape(defaultShape()),
+        breeze: stage.breeze,
+        countdownSeconds: 0,
+      });
+      expect(world.scenery.count).toBeGreaterThan(0);
+
+      let closest = Number.POSITIVE_INFINITY;
+      for (let i = 0; i < world.scenery.count; i++) {
+        const x = world.scenery.x[i];
+        const y = world.scenery.y[i];
+        const z = world.scenery.z[i];
+        const where = placeOnCourse(course, x, y, z, nearestPoint(course, x, y, z));
+        // How far past the edge of the floor this piece of scenery sits.
+        closest = Math.min(closest, abs(where.sideways) - where.halfWidth);
+      }
+      // Everything stands clear of the floor, with room for the ball beside it.
+      expect(toNumber(closest)).toBeGreaterThan(0.5);
+    });
+  }
 });
 
 describe('every course can actually be finished', () => {

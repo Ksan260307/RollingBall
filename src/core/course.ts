@@ -285,6 +285,15 @@ export interface Placement {
   halfWidth: number;
   /** Distance from the start line. */
   travelled: number;
+  /**
+   * How far past the start line or the finish the ball has gone, or 0 while
+   * it is still over the course.
+   *
+   * Without this the floor would seem to carry on for ever in both
+   * directions: the ball would roll away behind the start line on nothing at
+   * all, held up by a surface that is not drawn and does not exist.
+   */
+  pastEnd: number;
   /** What the floor is made of there. */
   surface: number;
   /** The extra properties of that stretch. */
@@ -298,6 +307,7 @@ const placement: Placement = {
   height: 0,
   halfWidth: 0,
   travelled: 0,
+  pastEnd: 0,
   surface: 0,
   flags: 0,
 };
@@ -354,7 +364,10 @@ export function placeOnCourse(
   placement.height =
     mul(rx, course.upX[point]) + mul(ry, course.upY[point]) + mul(rz, course.upZ[point]);
   placement.halfWidth = course.halfWidth[point];
-  placement.travelled = course.distance[point] + ahead;
+  const travelled = course.distance[point] + ahead;
+  placement.travelled = travelled;
+  placement.pastEnd =
+    travelled < 0 ? -travelled : travelled > course.totalLength ? travelled - course.totalLength : 0;
   placement.surface = course.surface[point];
   placement.flags = course.flags[point];
   return placement;
