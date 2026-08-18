@@ -96,7 +96,6 @@ export class GameView {
   private ballMesh: Mesh | null = null;
   private ballMaterial: MeshStandardMaterial | null = null;
   private ballSpin = new Quaternion();
-  private ballRadius = 0.5;
 
   private sky: Mesh;
   private ground: Mesh;
@@ -295,7 +294,7 @@ export class GameView {
   }
 
   /** Swaps in the ball the player built. */
-  async setBall(design: BallDesign, radiusMetres: number): Promise<void> {
+  async setBall(design: BallDesign): Promise<void> {
     if (this.ballMesh) {
       this.ballGroup.remove(this.ballMesh);
       this.ballMesh.geometry.dispose();
@@ -306,7 +305,6 @@ export class GameView {
     this.ballMesh = built.mesh;
     this.ballMaterial = built.material;
     this.ballGroup.add(built.mesh);
-    this.ballRadius = radiusMetres;
     this.ballSpin.identity();
 
     if (design.photo) {
@@ -376,8 +374,8 @@ export class GameView {
   }
 
   /** Starts a burst of sparkles at a point. */
-  burst(x: number, y: number, z: number, colour: string): void {
-    for (let n = 0; n < 6; n++) {
+  burst(x: number, y: number, z: number, colour: string, count = 6): void {
+    for (let n = 0; n < count; n++) {
       const mesh = this.sparkles[this.nextSparkle];
       const material = mesh.material as MeshBasicMaterial;
       material.color = new Color(colour);
@@ -441,7 +439,7 @@ export class GameView {
     const bz = pz + (nz - pz) * alpha;
 
     this.ballGroup.position.set(bx, by, bz);
-    this.rollBall(nx - px, ny - py, nz - pz);
+    this.spinBall(world, delta);
 
     this.followBall(world, bx, by, bz, delta);
 
@@ -456,24 +454,23 @@ export class GameView {
     this.renderer.render(this.scene, this.camera);
   }
 
-  /** Spins the ball by however far it just rolled. */
-  private rollBall(dx: number, dy: number, dz: number): void {
-    // Only the horizontal part of the movement turns the ball; dropping
-    // straight down does not make it spin.
-    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (distance < 1e-6) {
-      this.ballGroup.quaternion.copy(this.ballSpin);
-      return;
+  /**
+   * Turns the ball by its own turning speed.
+   *
+   * The rules work out the spin properly, so this simply follows it. That is
+   * why a skid looks like a skid: on ice the ball slides on without the
+   * surface pattern keeping up, because it genuinely is not rolling.
+   */
+  private spinBall(world: World, delta: number): void {
+    const wx = toMetres(world.spinX[0]);
+    const wy = toMetres(world.spinY[0]);
+    const wz = toMetres(world.spinZ[0]);
+    const rate = Math.sqrt(wx * wx + wy * wy + wz * wz);
+    if (rate > 1e-5) {
+      scratchAxis.set(wx / rate, wy / rate, wz / rate);
+      scratchQuaternion.setFromAxisAngle(scratchAxis, rate * delta);
+      this.ballSpin.premultiply(scratchQuaternion);
     }
-    scratchAxis.set(dz, 0, -dx);
-    if (scratchAxis.lengthSq() < 1e-9) {
-      this.ballGroup.quaternion.copy(this.ballSpin);
-      return;
-    }
-    scratchAxis.normalize();
-    const angle = distance / Math.max(0.15, this.ballRadius);
-    scratchQuaternion.setFromAxisAngle(scratchAxis, angle);
-    this.ballSpin.premultiply(scratchQuaternion);
     this.ballGroup.quaternion.copy(this.ballSpin);
   }
 

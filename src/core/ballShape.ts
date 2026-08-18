@@ -10,7 +10,7 @@
  * the same design always get exactly the same handling.
  */
 
-import { ONE, div, mul, sqrt } from './fixed';
+import { ONE, clamp, div, mul, sqrt } from './fixed';
 
 /** Cubes per side of the editing space. Odd, so there is a middle cube. */
 export const SHAPE_SIZE = 9;
@@ -38,8 +38,11 @@ export const PALETTE = [
   '#3a3f52',
 ];
 
-/** Half a cube, in stored metres; reach is measured in half-cube steps. */
+/** Half a cube, in stored metres; distances are measured in half-cube steps. */
 const HALF_CUBE = Math.round((CUBE_METRES / 2) * ONE);
+
+/** Two thirds, used when working out how hard a shape is to spin up. */
+const TWO_THIRDS = Math.round((2 / 3) * ONE);
 
 /** Turns a cube position into its slot number. */
 export function cellIndex(x: number, y: number, z: number): number {
@@ -114,12 +117,23 @@ export function pebbleShape(colour = 4): Uint8Array {
 export interface ShapeStats {
   /** How many cubes were used. */
   cubes: number;
-  /** Distance from the middle to the furthest cube, in stored metres. */
+  /** The distance the ball rests on, from its middle down to the floor. */
   radius: number;
   /** How heavy the ball is, where ONE is the weight of the standard ball. */
   weight: number;
   /** How evenly the cubes sit around the middle, from 0 to ONE. */
   smoothness: number;
+  /**
+   * How hard the ball is to spin up, worked out from where its cubes sit.
+   *
+   * Weight gathered near the middle gives a small number and a ball that
+   * gets going quickly; weight pushed out to the rim gives a large one and a
+   * ball that is slow to start but keeps going. A solid, evenly filled ball
+   * lands near 0.4, which is the figure a real one has.
+   */
+  spinResistance: number;
+  /** Distance from the middle out to the furthest corner, for drawing. */
+  reach: number;
 }
 
 /** The measurements of the ball everybody starts with, used as the yardstick. */
@@ -144,6 +158,7 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
   let longestSquared = 0;
   let surfaceCount = 0;
   let surfaceTotalSquared = 0;
+  let centreTotalSquared = 0;
 
   for (let x = 0; x < SHAPE_SIZE; x++) {
     for (let y = 0; y < SHAPE_SIZE; y++) {
@@ -157,6 +172,13 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
         const dz = 2 * (z - SHAPE_CENTRE) + (z >= SHAPE_CENTRE ? 1 : -1);
         const reachSquared = dx * dx + dy * dy + dz * dz;
         if (reachSquared > longestSquared) longestSquared = reachSquared;
+
+        // How far this cube sits from the middle, which is what decides how
+        // hard the whole ball is to spin up.
+        const midX = 2 * (x - SHAPE_CENTRE);
+        const midY = 2 * (y - SHAPE_CENTRE);
+        const midZ = 2 * (z - SHAPE_CENTRE);
+        centreTotalSquared += midX * midX + midY * midY + midZ * midZ;
 
         const exposed =
           cellAt(voxels, x - 1, y, z) === 0 ||
@@ -174,17 +196,49 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
   }
 
   if (cubes === 0) {
-    return { cubes: 0, radius: Math.round(CUBE_METRES * ONE), weight: ONE >> 3, smoothness: ONE };
+    const fallback = Math.round(CUBE_METRES * ONE);
+    return {
+      cubes: 0,
+      radius: fallback,
+      reach: fallback,
+      weight: ONE >> 3,
+      smoothness: ONE,
+      spinResistance: Math.round(0.4 * ONE),
+    };
   }
 
-  // Half-cube units back into stored metres.
-  const radius = mul(sqrt(longestSquared * ONE), HALF_CUBE);
-  const averageSquared = Math.floor(surfaceTotalSquared / Math.max(1, surfaceCount));
-  const ratio = longestSquared > 0 ? div(averageSquared, longestSquared) : ONE;
+  // The ball rests on its typical outside distance rather than on its single
+  // furthest corner, which is what keeps a lumpy design sitting on the floor
+  // instead of hovering above it.
+  const averageSquared = div(surfaceTotalSquared, Math.max(1, surfaceCount));
+  const radius = mul(sqrt(averageSquared), HALF_CUBE);
+  const reach = mul(sqrt(longestSquared * ONE), HALF_CUBE);
+
+  const ratio = longestSquared > 0 ? div(averageSquared, longestSquared * ONE) : ONE;
   const smoothness = Math.min(ONE, sqrt(ratio));
   const weight = Math.max(ONE >> 3, Math.round((cubes * ONE) / REFERENCE_CUBES));
 
-  return { cubes, radius: Math.max(Math.round(CUBE_METRES * ONE), radius), weight, smoothness };
+  // Two thirds of the average distance from the middle, plus each cube's own
+  // share, divided by the distance the ball rests on. The units cancel, so
+  // this is a plain ratio and comes out at the textbook figures: about 0.4
+  // for a solid ball, about 0.67 for a hollow shell.
+  const meanCentreSquared = div(centreTotalSquared, cubes);
+  const spread = mul(TWO_THIRDS, meanCentreSquared + ONE);
+  const spinResistance = clamp(
+    averageSquared > 0 ? div(spread, averageSquared) : Math.round(0.4 * ONE),
+    Math.round(0.12 * ONE),
+    Math.round(1.4 * ONE),
+  );
+
+  const floor = Math.round((CUBE_METRES / 2) * ONE);
+  return {
+    cubes,
+    radius: Math.max(floor, radius),
+    reach: Math.max(floor, reach),
+    weight,
+    smoothness,
+    spinResistance,
+  };
 }
 
 /** A short fingerprint of a design, used to spot when it has changed. */

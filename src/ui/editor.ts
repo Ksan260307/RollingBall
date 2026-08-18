@@ -303,10 +303,15 @@ export class BallEditor {
   private refreshStats(): void {
     const stats = measureShape(this.design.voxels);
     clear(this.statsRow);
+    // How quickly the ball gets going is not a made-up number: it is what
+    // the rules actually work out from where the cubes sit. Weight gathered
+    // near the middle spins up faster than weight out at the rim.
+    const pickup = ONE / (1 + stats.spinResistance / ONE);
     const rows: [string, string][] = [
       [TEXT.ballSize, `${Math.round((stats.radius / ONE) * 200)} cm`],
       [TEXT.ballWeight, `${Math.round((stats.weight / ONE) * 100)} %`],
       [TEXT.ballRoundness, `${Math.round((stats.smoothness / ONE) * 100)} %`],
+      [TEXT.ballPickup, `${Math.round((pickup / ONE) * 100)} %`],
       [TEXT.ballBlocks, String(stats.cubes)],
     ];
     for (const [label, value] of rows) {

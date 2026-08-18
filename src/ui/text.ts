@@ -84,6 +84,7 @@ export const TEXT = {
   ballSize: '大きさ',
   ballWeight: 'おもさ',
   ballRoundness: 'ころがりやすさ',
+  ballPickup: 'うごきだし',
   ballBlocks: 'ブロックの数',
 
   settingsZoom: 'カメラの近さ',

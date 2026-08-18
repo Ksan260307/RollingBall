@@ -131,7 +131,7 @@ function main(): void {
 
   view.zoom = settings.zoom;
   view.richGraphics = settings.richGraphics;
-  void view.setBall(design, measureShape(design.voxels).radius / ONE);
+  void view.setBall(design);
   screens.setStages(records);
   hud.setVisible(false);
   tools.classList.add('is-hidden');
@@ -147,7 +147,7 @@ function main(): void {
   editor.onSave((next) => {
     design = next;
     saveBall(design);
-    void view.setBall(design, measureShape(design.voxels).radius / ONE);
+    void view.setBall(design);
     editor.close();
     editor.root.classList.remove('is-showing');
     canvas.classList.remove('is-hidden');
@@ -270,13 +270,16 @@ function main(): void {
           active.update(delta, controls.read());
           hud.update(active);
           for (const moment of active.world.moments) {
+            const mx = moment.x / ONE;
+            const my = moment.y / ONE;
+            const mz = moment.z / ONE;
             if (moment.kind === 'collect') {
-              view.burst(
-                moment.x / ONE,
-                moment.y / ONE,
-                moment.z / ONE,
-                currentStage.mood.edge,
-              );
+              view.burst(mx, my, mz, currentStage.mood.edge);
+            } else if (moment.kind === 'skid') {
+              // A puff of dust where the ball is sliding rather than rolling.
+              view.burst(mx, my - 0.3, mz, '#d5dbe8', 2);
+            } else if (moment.kind === 'land') {
+              view.burst(mx, my - 0.2, mz, '#ffffff', 3);
             }
           }
           if (!active.running) finishRun();

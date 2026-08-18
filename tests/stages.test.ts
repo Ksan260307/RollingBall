@@ -129,10 +129,11 @@ describe('every course can actually be finished', () => {
         countdownSeconds: 0,
       });
       const result = runWithAutopilot(world);
-      // The suggested time should be within reach of a careful player but
-      // not handed out for simply coasting down the middle.
-      expect(stage.targetSeconds).toBeLessThan(result.seconds + 12);
-      expect(stage.targetSeconds).toBeGreaterThan(result.seconds - 20);
+      // The suggested time should be within reach of a careful player, but
+      // not handed out for simply coasting down the middle. A plain coasting
+      // run is the yardstick: the target sits a little under it.
+      expect(stage.targetSeconds).toBeLessThan(result.seconds);
+      expect(stage.targetSeconds).toBeGreaterThan(result.seconds - 7);
     }
   });
 

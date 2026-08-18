@@ -18,6 +18,16 @@
 import { Course, PointFlag, Surface, placeOnCourse } from './course';
 import { ONE, abs, clamp, div, length3, mul, sign } from './fixed';
 import {
+  Triple,
+  dot,
+  gripShare,
+  magnitude,
+  rollingSpinInto,
+  slipInto,
+  spinChangeInto,
+  triple,
+} from './rolling';
+import {
   EntityStore,
   GroupSummary,
   Kind,
@@ -52,14 +62,22 @@ export type RunStateValue = (typeof RunState)[keyof typeof RunState];
 /** Pull of gravity, in metres per second per second. */
 const GRAVITY = Math.round(9.80665 * ONE);
 
-/** How hard the player can push the ball sideways while it is on the floor. */
-const STEER_PUSH = Math.round(11.0 * ONE);
+/**
+ * How far the world tips when the player drags all the way across.
+ *
+ * The controls tilt the whole course rather than shoving the ball directly.
+ * That is what makes the ball's own shape matter: a tilted floor can only
+ * move the ball as fast as the ground can spin it up, so a ball with its
+ * weight out at the rim is genuinely more sluggish, without any extra rule
+ * being written to say so.
+ */
+const TILT_SIDEWAYS = Math.round(8.2 * ONE);
 
-/** How hard the player can push the ball forward or hold it back. */
-const FORWARD_PUSH = Math.round(5.5 * ONE);
+/** The same, for dragging forwards and back. */
+const TILT_AHEAD = Math.round(4.6 * ONE);
 
-/** How much steering still works while the ball is in the air. */
-const AIR_CONTROL = Math.round(2.6 * ONE);
+/** How much steering still works while the ball is off the ground. */
+const AIR_CONTROL = Math.round(2.2 * ONE);
 
 /** How close to the floor still counts as touching it. */
 const CONTACT_SLACK = Math.round(0.07 * ONE);
@@ -76,13 +94,19 @@ const CATCH_DEPTH = Math.round(1.6 * ONE);
 const FALL_LIMIT = Math.round(6.0 * ONE);
 
 /** How much bounce is left after landing. */
-const LANDING_BOUNCE = Math.round(0.28 * ONE);
+const LANDING_BOUNCE = Math.round(0.26 * ONE);
 
 /** How much bounce is left after hitting a wall. */
 const WALL_BOUNCE = Math.round(0.45 * ONE);
 
+/** How much a wall scrubs at the ball as it slides along it. */
+const WALL_GRIP = Math.round(0.4 * ONE);
+
 /** How much the air slows the ball, per unit of speed. */
-const AIR_RESISTANCE = Math.round(0.022 * ONE);
+const AIR_RESISTANCE = Math.round(0.0062 * ONE);
+
+/** How much of its spin the ball keeps each step while off the ground. */
+const AIR_SPIN_KEEP = Math.round(0.9985 * ONE);
 
 /** How much a sideways gust can shift the ball on a breezy course. */
 const BREEZE_PUSH = Math.round(3.2 * ONE);
@@ -90,67 +114,86 @@ const BREEZE_PUSH = Math.round(3.2 * ONE);
 /** Fastest the ball is ever allowed to travel. */
 const SPEED_LIMIT = Math.round(34 * ONE);
 
+/** Fastest the ball is ever allowed to spin, in turns of a radian a second. */
+const SPIN_LIMIT = Math.round(90 * ONE);
+
+/** A skid has to be this fast before it is worth telling anyone about. */
+const SKID_NOTICE = Math.round(1.4 * ONE);
+
 /** How each kind of floor behaves. */
 interface FloorBehaviour {
-  /** Steady slowing, in metres per second per second. Negative speeds up. */
-  drag: number;
-  /** Extra slowing that grows with speed. */
-  dragPerSpeed: number;
-  /** How well steering bites, where ONE is normal. */
+  /** How hard the floor can hold the ball before it starts to skid. */
   grip: number;
+  /** Steady slowing while rolling, as a share of how hard the ball presses. */
+  rollingDrag: number;
+  /** A steady shove along the course, for the speed-up strips. */
+  shove: number;
 }
 
 const FLOORS: Record<number, FloorBehaviour> = {
   [Surface.Normal]: {
-    drag: Math.round(0.5 * ONE),
-    dragPerSpeed: Math.round(0.034 * ONE),
-    grip: ONE,
+    grip: Math.round(0.9 * ONE),
+    rollingDrag: Math.round(0.03 * ONE),
+    shove: 0,
   },
   [Surface.Slick]: {
-    drag: Math.round(0.06 * ONE),
-    dragPerSpeed: Math.round(0.012 * ONE),
-    grip: Math.round(0.34 * ONE),
+    // Low enough that the ball cannot quite spin itself up on the steeper
+    // stretches, so it visibly skids there while still rolling on gentle
+    // ones. That is how a real slippery slope behaves.
+    grip: Math.round(0.045 * ONE),
+    rollingDrag: Math.round(0.008 * ONE),
+    shove: 0,
   },
   [Surface.Rough]: {
-    drag: Math.round(2.0 * ONE),
-    dragPerSpeed: Math.round(0.06 * ONE),
-    grip: Math.round(0.86 * ONE),
+    grip: Math.round(1.1 * ONE),
+    rollingDrag: Math.round(0.085 * ONE),
+    shove: 0,
   },
   [Surface.Boost]: {
-    drag: Math.round(-7.0 * ONE),
-    dragPerSpeed: Math.round(0.02 * ONE),
-    grip: ONE,
+    grip: Math.round(0.9 * ONE),
+    rollingDrag: Math.round(0.02 * ONE),
+    shove: Math.round(6.5 * ONE),
   },
 };
 
 /** How the ball handles, worked out once from the player's design. */
 export interface BallFeel {
+  /** What the ball rests on: middle to floor. */
   radius: number;
   weight: number;
   smoothness: number;
-  /** Steering strength after the design has been taken into account. */
-  steerPush: number;
-  /** How much the floor slows this ball down, where ONE is normal. */
+  /** How hard the ball is to spin up, from where its cubes sit. */
+  spinResistance: number;
+  /**
+   * How much of a skid one shove from the ground can take out. A ball that
+   * is easy to spin up gives up more of its skid at once.
+   */
+  gripShare: number;
+  /** How well this ball holds the floor, where ONE is an even, round one. */
+  gripScale: number;
+  /** How much this ball scrubs off while rolling, where ONE is normal. */
   dragScale: number;
 }
 
 /** Turns a measured design into the numbers the physics uses. */
 export function ballFeelFrom(stats: ShapeStats): BallFeel {
-  // A lumpy ball steers a little less crisply and scrubs off more speed.
-  const grip = Math.round(0.62 * ONE) + mul(Math.round(0.38 * ONE), stats.smoothness);
-  const heaviness = Math.round(0.72 * ONE) + mul(Math.round(0.28 * ONE), stats.weight);
+  // A lumpy ball meets the floor unevenly, so it holds on less well and
+  // scrubs off more speed. How quickly it gets going is not fiddled with
+  // here at all: that already falls out of where its cubes sit.
   return {
     radius: stats.radius,
     weight: stats.weight,
     smoothness: stats.smoothness,
-    steerPush: div(mul(STEER_PUSH, grip), heaviness),
-    dragScale: Math.round(1.34 * ONE) - mul(Math.round(0.34 * ONE), stats.smoothness),
+    spinResistance: stats.spinResistance,
+    gripShare: gripShare(stats.spinResistance),
+    gripScale: Math.round(0.72 * ONE) + mul(Math.round(0.28 * ONE), stats.smoothness),
+    dragScale: Math.round(1.35 * ONE) - mul(Math.round(0.35 * ONE), stats.smoothness),
   };
 }
 
 /** Something worth showing or hearing about, produced by a step. */
 export interface Moment {
-  kind: 'collect' | 'land' | 'wall' | 'finish' | 'fall';
+  kind: 'collect' | 'land' | 'wall' | 'skid' | 'finish' | 'fall';
   player: number;
   x: number;
   y: number;
@@ -183,6 +226,10 @@ const ATTENTION_RANGE = Math.round(46 * ONE);
 const REGION_SPACING = 8; // metres
 const SCENERY_LIMIT = 320;
 
+/** Working space for the rolling maths, reused so nothing is thrown away. */
+const slipScratch: Triple = triple();
+const spinScratch: Triple = triple();
+
 /** Divides a per-second amount into one step's worth, without drifting. */
 function perStep(value: number): number {
   return value >= 0
@@ -211,6 +258,10 @@ export class World {
   readonly velocityX: Int32Array;
   readonly velocityY: Int32Array;
   readonly velocityZ: Int32Array;
+  /** How fast the ball is turning, and about which way. */
+  readonly spinX: Int32Array;
+  readonly spinY: Int32Array;
+  readonly spinZ: Int32Array;
   readonly state: Int32Array;
   readonly travelled: Int32Array;
   readonly sideways: Int32Array;
@@ -247,6 +298,9 @@ export class World {
     this.velocityX = new Int32Array(slots);
     this.velocityY = new Int32Array(slots);
     this.velocityZ = new Int32Array(slots);
+    this.spinX = new Int32Array(slots);
+    this.spinY = new Int32Array(slots);
+    this.spinZ = new Int32Array(slots);
     this.state = new Int32Array(slots);
     this.travelled = new Int32Array(slots);
     this.sideways = new Int32Array(slots);
@@ -283,6 +337,9 @@ export class World {
       this.velocityX[p] = 0;
       this.velocityY[p] = 0;
       this.velocityZ[p] = 0;
+      this.spinX[p] = 0;
+      this.spinY[p] = 0;
+      this.spinZ[p] = 0;
       // With no countdown asked for, the ball is free from the very first step.
       this.state[p] = this.countdown > 0 ? RunState.Ready : RunState.Rolling;
       this.hint[p] = 0;
@@ -369,6 +426,40 @@ export class World {
     return length3(this.velocityX[player], this.velocityY[player], this.velocityZ[player]);
   }
 
+  /** How fast the ball is turning, however it happens to be pointed. */
+  spinFor(player = 0): number {
+    return length3(this.spinX[player], this.spinY[player], this.spinZ[player]);
+  }
+
+  /**
+   * How much of the ball is sliding rather than rolling, from 0 (rolling
+   * cleanly) upwards. The picture uses this to show a skid.
+   */
+  skidFor(player = 0): number {
+    if (!this.grounded[player]) return 0;
+    const point = this.hintFor(player);
+    const c = this.course;
+    slipInto(
+      slipScratch,
+      this.velocityX[player],
+      this.velocityY[player],
+      this.velocityZ[player],
+      this.spinX[player],
+      this.spinY[player],
+      this.spinZ[player],
+      c.upX[point],
+      c.upY[point],
+      c.upZ[point],
+      this.feel.radius,
+    );
+    return magnitude(slipScratch.x, slipScratch.y, slipScratch.z);
+  }
+
+  /** Which point of the course the ball was last found beside. */
+  hintFor(player = 0): number {
+    return this.hint[player];
+  }
+
   /**
    * Takes the world forward by exactly one step.
    *
@@ -422,81 +513,19 @@ export class World {
     const withinFloor = abs(where.sideways) <= where.halfWidth;
     const touching =
       !overGap && withinFloor && gapFromFloor <= CONTACT_SLACK && gapFromFloor > -CATCH_DEPTH;
+    const floor = FLOORS[where.surface] ?? FLOORS[Surface.Normal];
 
-    let accelX = 0;
-    let accelY = -GRAVITY;
-    let accelZ = 0;
+    // The player tips the course; gravity does the rest of the work. Off the
+    // ground there is nothing to push against, so only a token amount of
+    // steering is allowed through.
+    const sideways = touching
+      ? mul(TILT_SIDEWAYS, controls.steer)
+      : mul(AIR_CONTROL, controls.steer);
+    const ahead = touching ? mul(TILT_AHEAD, controls.push) : 0;
 
-    if (touching) {
-      // The floor holds the ball up: cancel the part of gravity pressing into
-      // it, and let the rest pull the ball along the slope.
-      const intoFloor = mul(accelX, upX) + mul(accelY, upY) + mul(accelZ, upZ);
-      if (intoFloor < 0) {
-        accelX -= mul(intoFloor, upX);
-        accelY -= mul(intoFloor, upY);
-        accelZ -= mul(intoFloor, upZ);
-      }
-
-      const floor = FLOORS[where.surface] ?? FLOORS[Surface.Normal];
-      const grip = floor.grip;
-
-      // Steering and pushing, both along the course, not along the screen.
-      const steer = mul(mul(this.feel.steerPush, controls.steer), grip);
-      accelX += mul(rightX, steer);
-      accelY += mul(rightY, steer);
-      accelZ += mul(rightZ, steer);
-      const push = mul(mul(FORWARD_PUSH, controls.push), grip);
-      accelX += mul(forwardX, push);
-      accelY += mul(forwardY, push);
-      accelZ += mul(forwardZ, push);
-
-      // Rolling resistance, always against the direction of travel.
-      const speed = this.speedFor(player);
-      if (speed > 0) {
-        const scaled = mul(floor.drag, this.feel.dragScale) + mul(floor.dragPerSpeed, speed);
-        const slow = -scaled;
-        accelX += div(mul(this.velocityX[player], slow), speed);
-        accelY += div(mul(this.velocityY[player], slow), speed);
-        accelZ += div(mul(this.velocityZ[player], slow), speed);
-      }
-
-      // Sit the ball exactly on the floor and stop it sinking in.
-      if (gapFromFloor < 0) {
-        this.x[player] -= mul(upX, gapFromFloor);
-        this.y[player] -= mul(upY, gapFromFloor);
-        this.z[player] -= mul(upZ, gapFromFloor);
-        const intoSurface =
-          mul(this.velocityX[player], upX) +
-          mul(this.velocityY[player], upY) +
-          mul(this.velocityZ[player], upZ);
-        if (intoSurface < 0) {
-          // Cancel the movement into the floor, and add a little bounce back
-          // only when the landing was hard enough to be worth feeling.
-          const impact = -intoSurface;
-          const springiness = impact > Math.round(1.6 * ONE) ? LANDING_BOUNCE : 0;
-          const change = impact + mul(impact, springiness);
-          this.velocityX[player] += mul(upX, change);
-          this.velocityY[player] += mul(upY, change);
-          this.velocityZ[player] += mul(upZ, change);
-          if (impact > Math.round(2.0 * ONE)) this.addMoment('land', player, impact);
-        }
-      }
-    } else {
-      // In the air: a little steering still helps, but much less.
-      const steer = mul(AIR_CONTROL, controls.steer);
-      accelX += mul(rightX, steer);
-      accelY += mul(rightY, steer);
-      accelZ += mul(rightZ, steer);
-    }
-
-    // The air itself always resists.
-    const speedNow = this.speedFor(player);
-    if (speedNow > 0) {
-      const resist = mul(AIR_RESISTANCE, speedNow);
-      accelX -= mul(this.velocityX[player], resist);
-      accelY -= mul(this.velocityY[player], resist);
-      accelZ -= mul(this.velocityZ[player], resist);
-    }
+    let accelX = mul(rightX, sideways) + mul(forwardX, ahead);
+    let accelY = -GRAVITY + mul(rightY, sideways) + mul(forwardY, ahead);
+    let accelZ = mul(rightZ, sideways) + mul(forwardZ, ahead);
 
     // A breeze crossing the course, read straight from the surroundings.
     if (this.breeze > 0) {
@@ -516,19 +545,54 @@ export class World {
       accelZ += mul(rightZ, nudge);
     }
 
+    // How hard the ball presses onto the floor. Everything the ground can do
+    // to the ball, whether hold it, spin it or slow it, is measured against
+    // this one number.
+    let pressing = 0;
+    if (touching) {
+      const intoFloor = dot(accelX, accelY, accelZ, upX, upY, upZ);
+      if (intoFloor < 0) {
+        pressing = -intoFloor;
+        accelX -= mul(upX, intoFloor);
+        accelY -= mul(upY, intoFloor);
+        accelZ -= mul(upZ, intoFloor);
+      }
+      if (floor.shove !== 0) {
+        accelX += mul(forwardX, floor.shove);
+        accelY += mul(forwardY, floor.shove);
+        accelZ += mul(forwardZ, floor.shove);
+      }
+    }
+
+    // The air always resists, and a heavier ball shrugs it off better.
+    const speedNow = this.speedFor(player);
+    if (speedNow > 0) {
+      const resist = div(mul(AIR_RESISTANCE, speedNow), Math.max(1, this.feel.weight));
+      accelX -= mul(this.velocityX[player], resist);
+      accelY -= mul(this.velocityY[player], resist);
+      accelZ -= mul(this.velocityZ[player], resist);
+    }
+
     this.velocityX[player] += perStep(accelX);
     this.velocityY[player] += perStep(accelY);
     this.velocityZ[player] += perStep(accelZ);
 
-    // Keep the ball inside a sensible top speed.
-    const capped = this.speedFor(player);
-    if (capped > SPEED_LIMIT) {
-      const scale = div(SPEED_LIMIT, capped);
-      this.velocityX[player] = mul(this.velocityX[player], scale);
-      this.velocityY[player] = mul(this.velocityY[player], scale);
-      this.velocityZ[player] = mul(this.velocityZ[player], scale);
+    if (touching) {
+      this.settleOnFloor(player, upX, upY, upZ, gapFromFloor);
+      // The ground grips the ball at the one point where they touch. That
+      // grip is what turns sliding into rolling, and a slippery floor is
+      // simply one that runs out of grip too soon.
+      const hold = perStep(mul(mul(floor.grip, this.feel.gripScale), pressing));
+      this.applyGrip(player, upX, upY, upZ, hold, true);
+      this.applyRollingDrag(player, upX, upY, upZ, floor, pressing);
+    } else {
+      // Off the ground the spin simply carries on.
+      this.spinX[player] = mul(this.spinX[player], AIR_SPIN_KEEP);
+      this.spinY[player] = mul(this.spinY[player], AIR_SPIN_KEEP);
+      this.spinZ[player] = mul(this.spinZ[player], AIR_SPIN_KEEP);
     }
-    if (capped > this.topSpeed[player]) this.topSpeed[player] = capped;
+
+    this.capSpeeds(player);
 
     this.x[player] += perStep(this.velocityX[player]);
     this.y[player] += perStep(this.velocityY[player]);
@@ -537,6 +601,158 @@ export class World {
     this.settleAgainstWalls(player, (where.flags & PointFlag.Walls) !== 0);
     this.gatherOrbs(player);
     this.judge(player);
+  }
+
+  /** Sits the ball on the floor and stops it sinking in. */
+  private settleOnFloor(
+    player: number,
+    upX: number,
+    upY: number,
+    upZ: number,
+    gapFromFloor: number,
+  ): void {
+    if (gapFromFloor >= 0) return;
+    this.x[player] -= mul(upX, gapFromFloor);
+    this.y[player] -= mul(upY, gapFromFloor);
+    this.z[player] -= mul(upZ, gapFromFloor);
+    const intoSurface = dot(
+      this.velocityX[player],
+      this.velocityY[player],
+      this.velocityZ[player],
+      upX,
+      upY,
+      upZ,
+    );
+    if (intoSurface >= 0) return;
+    // Cancel the movement into the floor, and add a little bounce back only
+    // when the landing was hard enough to be worth feeling.
+    const impact = -intoSurface;
+    const springiness = impact > Math.round(1.6 * ONE) ? LANDING_BOUNCE : 0;
+    const change = impact + mul(impact, springiness);
+    this.velocityX[player] += mul(upX, change);
+    this.velocityY[player] += mul(upY, change);
+    this.velocityZ[player] += mul(upZ, change);
+    if (impact > Math.round(2.0 * ONE)) this.addMoment('land', player, impact);
+  }
+
+  /**
+   * The ground takes a bite out of however fast the ball is sliding, and the
+   * same bite turns the ball, because it lands at the bottom of the ball
+   * rather than through the middle.
+   *
+   * When the ground can take out the whole skid, the ball rolls cleanly. When
+   * it cannot, on ice or under hard steering, what is left over is a visible
+   * skid, which is how a real ball behaves.
+   *
+   * @param allowance the largest change in travel this surface can manage
+   * @param report    whether a bad skid is worth mentioning to the player
+   */
+  private applyGrip(
+    player: number,
+    normalX: number,
+    normalY: number,
+    normalZ: number,
+    allowance: number,
+    report: boolean,
+  ): void {
+    if (allowance <= 0) return;
+    slipInto(
+      slipScratch,
+      this.velocityX[player],
+      this.velocityY[player],
+      this.velocityZ[player],
+      this.spinX[player],
+      this.spinY[player],
+      this.spinZ[player],
+      normalX,
+      normalY,
+      normalZ,
+      this.feel.radius,
+    );
+    const skid = magnitude(slipScratch.x, slipScratch.y, slipScratch.z);
+    if (skid <= 0) return;
+
+    const wanted = mul(this.feel.gripShare, skid);
+    const change = wanted < allowance ? wanted : allowance;
+    const changeX = -div(mul(slipScratch.x, change), skid);
+    const changeY = -div(mul(slipScratch.y, change), skid);
+    const changeZ = -div(mul(slipScratch.z, change), skid);
+
+    this.velocityX[player] += changeX;
+    this.velocityY[player] += changeY;
+    this.velocityZ[player] += changeZ;
+
+    spinChangeInto(
+      spinScratch,
+      changeX,
+      changeY,
+      changeZ,
+      normalX,
+      normalY,
+      normalZ,
+      this.feel.spinResistance,
+      this.feel.radius,
+    );
+    this.spinX[player] += spinScratch.x;
+    this.spinY[player] += spinScratch.y;
+    this.spinZ[player] += spinScratch.z;
+
+    // A long skid would otherwise report itself on every single step, so it
+    // is mentioned now and then rather than constantly.
+    if (report && wanted > allowance && skid > SKID_NOTICE && this.step % 8 === 0) {
+      this.addMoment('skid', player, skid);
+    }
+  }
+
+  /**
+   * The steady cost of rolling along. It comes out of the travel and the
+   * spin together, so that slowing down does not by itself tip the ball into
+   * a skid.
+   */
+  private applyRollingDrag(
+    player: number,
+    upX: number,
+    upY: number,
+    upZ: number,
+    floor: FloorBehaviour,
+    pressing: number,
+  ): void {
+    const speed = this.speedFor(player);
+    if (speed <= 0 || pressing <= 0) return;
+    const slow = perStep(mul(mul(floor.rollingDrag, this.feel.dragScale), pressing));
+    const drop = slow < speed ? slow : speed;
+    if (drop <= 0) return;
+    const changeX = -div(mul(this.velocityX[player], drop), speed);
+    const changeY = -div(mul(this.velocityY[player], drop), speed);
+    const changeZ = -div(mul(this.velocityZ[player], drop), speed);
+    this.velocityX[player] += changeX;
+    this.velocityY[player] += changeY;
+    this.velocityZ[player] += changeZ;
+
+    rollingSpinInto(spinScratch, changeX, changeY, changeZ, upX, upY, upZ, this.feel.radius);
+    this.spinX[player] += spinScratch.x;
+    this.spinY[player] += spinScratch.y;
+    this.spinZ[player] += spinScratch.z;
+  }
+
+  /** Keeps travel and spin inside sensible limits. */
+  private capSpeeds(player: number): void {
+    const speed = this.speedFor(player);
+    if (speed > SPEED_LIMIT) {
+      const scale = div(SPEED_LIMIT, speed);
+      this.velocityX[player] = mul(this.velocityX[player], scale);
+      this.velocityY[player] = mul(this.velocityY[player], scale);
+      this.velocityZ[player] = mul(this.velocityZ[player], scale);
+    }
+    if (speed > this.topSpeed[player]) this.topSpeed[player] = speed;
+
+    const spin = this.spinFor(player);
+    if (spin > SPIN_LIMIT) {
+      const scale = div(SPIN_LIMIT, spin);
+      this.spinX[player] = mul(this.spinX[player], scale);
+      this.spinY[player] = mul(this.spinY[player], scale);
+      this.spinZ[player] = mul(this.spinZ[player], scale);
+    }
   }
 
   private settleAgainstWalls(player: number, hasWalls: boolean): void {
@@ -553,17 +769,31 @@ export class World {
     this.y[player] -= mul(c.rightY[i], overshoot * direction);
     this.z[player] -= mul(c.rightZ[i], overshoot * direction);
 
-    const intoWall =
-      mul(this.velocityX[player], c.rightX[i]) +
-      mul(this.velocityY[player], c.rightY[i]) +
-      mul(this.velocityZ[player], c.rightZ[i]);
-    if (intoWall * direction > 0) {
-      const change = -intoWall - mul(intoWall, WALL_BOUNCE);
-      this.velocityX[player] += mul(c.rightX[i], change);
-      this.velocityY[player] += mul(c.rightY[i], change);
-      this.velocityZ[player] += mul(c.rightZ[i], change);
-      if (abs(intoWall) > Math.round(1.5 * ONE)) this.addMoment('wall', player, abs(intoWall));
-    }
+    // The wall pushes back along its own face, so its outward direction
+    // points away from whichever edge the ball has run into.
+    const wallX = -c.rightX[i] * direction;
+    const wallY = -c.rightY[i] * direction;
+    const wallZ = -c.rightZ[i] * direction;
+    const intoWall = dot(
+      this.velocityX[player],
+      this.velocityY[player],
+      this.velocityZ[player],
+      wallX,
+      wallY,
+      wallZ,
+    );
+    if (intoWall >= 0) return;
+
+    const impact = -intoWall;
+    const change = impact + mul(impact, WALL_BOUNCE);
+    this.velocityX[player] += mul(wallX, change);
+    this.velocityY[player] += mul(wallY, change);
+    this.velocityZ[player] += mul(wallZ, change);
+
+    // Scrubbing along the wall also sets the ball spinning, by no more than
+    // the knock itself can account for.
+    this.applyGrip(player, wallX, wallY, wallZ, mul(WALL_GRIP, change), false);
+    if (impact > Math.round(1.5 * ONE)) this.addMoment('wall', player, impact);
   }
 
   private gatherOrbs(player: number): void {
@@ -726,6 +956,9 @@ export class World {
         .add(this.velocityX[p])
         .add(this.velocityY[p])
         .add(this.velocityZ[p])
+        .add(this.spinX[p])
+        .add(this.spinY[p])
+        .add(this.spinZ[p])
         .add(this.state[p])
         .add(this.elapsedSteps[p])
         .add(this.collected[p]);
@@ -746,6 +979,9 @@ export interface Snapshot {
   velocityX: Int32Array;
   velocityY: Int32Array;
   velocityZ: Int32Array;
+  spinX: Int32Array;
+  spinY: Int32Array;
+  spinZ: Int32Array;
   state: Int32Array;
   travelled: Int32Array;
   topSpeed: Int32Array;
@@ -773,6 +1009,9 @@ export function capture(world: World): Snapshot {
     velocityX: world.velocityX.slice(),
     velocityY: world.velocityY.slice(),
     velocityZ: world.velocityZ.slice(),
+    spinX: world.spinX.slice(),
+    spinY: world.spinY.slice(),
+    spinZ: world.spinZ.slice(),
     state: world.state.slice(),
     travelled: world.travelled.slice(),
     topSpeed: world.topSpeed.slice(),
@@ -799,6 +1038,9 @@ export function rewind(world: World, snapshot: Snapshot): void {
   world.velocityX.set(snapshot.velocityX);
   world.velocityY.set(snapshot.velocityY);
   world.velocityZ.set(snapshot.velocityZ);
+  world.spinX.set(snapshot.spinX);
+  world.spinY.set(snapshot.spinY);
+  world.spinZ.set(snapshot.spinZ);
   world.state.set(snapshot.state);
   world.travelled.set(snapshot.travelled);
   world.topSpeed.set(snapshot.topSpeed);

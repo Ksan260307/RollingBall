@@ -235,11 +235,14 @@ describe('winding a run back', () => {
 });
 
 describe('the ball the player built', () => {
-  it('turns a round design into crisp steering', () => {
+  it('turns a round design into a better grip on the floor', () => {
     const round = ballFeelFrom(measureShape(defaultShape()));
     const boxy = ballFeelFrom(measureShape(cubeShape()));
-    expect(round.steerPush).toBeGreaterThan(boxy.steerPush);
+    expect(round.gripScale).toBeGreaterThan(boxy.gripScale);
     expect(round.dragScale).toBeLessThan(boxy.dragScale);
+    // A box carries more of its weight out at the corners, so it takes
+    // longer to get spinning.
+    expect(round.spinResistance).toBeLessThan(boxy.spinResistance);
   });
 
   it('makes a small design lighter than a large one', () => {

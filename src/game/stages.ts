@@ -52,7 +52,7 @@ export const STAGES: Stage[] = [
     },
     breeze: 0,
     seed: 0x51a9e1,
-    targetSeconds: 24,
+    targetSeconds: 18,
     pieces: [
       { length: 12, drop: 6, width: 10, walls: true },
       { length: 14, turn: -20, drop: 7, width: 9, bank: -5, walls: true },
@@ -79,7 +79,7 @@ export const STAGES: Stage[] = [
     },
     breeze: Math.round(0.55 * ONE),
     seed: 0x2c77b3,
-    targetSeconds: 26,
+    targetSeconds: 17,
     pieces: [
       { length: 10, drop: 8, width: 8, walls: true },
       { length: 14, turn: 30, drop: 7, width: 7, bank: 9, walls: true },
@@ -107,7 +107,7 @@ export const STAGES: Stage[] = [
     },
     breeze: Math.round(0.3 * ONE),
     seed: 0x9f3d05,
-    targetSeconds: 28,
+    targetSeconds: 15,
     pieces: [
       { length: 10, drop: 9, width: 7, walls: true },
       { length: 12, turn: 18, drop: 8, width: 5 },
