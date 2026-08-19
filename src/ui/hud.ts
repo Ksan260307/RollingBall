@@ -18,6 +18,10 @@ export class Hud {
   private readonly rush = el('div', { class: 'speed-rush' });
   /** How far ahead of, or behind, the best run so far. */
   private readonly gap = el('div', { class: 'hud-gap is-hidden' });
+  /** The arrow under the finger, showing which way the ball is being sent. */
+  private readonly dragShaft = el('div', { class: 'drag-shaft' });
+  private readonly dragArrow = el('div', { class: 'drag-arrow' }, this.dragShaft);
+  private readonly dragGuide = el('div', { class: 'drag-guide is-hidden' }, this.dragArrow);
   private readonly timeValue: HTMLElement;
   private readonly speedValue: HTMLElement;
   private readonly bestValue: HTMLElement;
@@ -57,6 +61,7 @@ export class Hud {
       'div',
       { class: 'hud', id: 'hud' },
       this.rush,
+      this.dragGuide,
       this.gap,
       el(
         'div',
@@ -99,6 +104,50 @@ export class Hud {
   }
 
   /** Refreshes everything from the run in progress. */
+  /**
+   * Draws the arrow under the finger.
+   *
+   * It starts where the drag started and points where the finger has gone,
+   * which is exactly what the ball is being told to do. It stops growing at
+   * a full push and lights up there, so the limit shows without anything
+   * else having to be drawn.
+   *
+   * @param reading what the player is doing, straight from the controls
+   */
+  showDrag(reading: {
+    active: boolean;
+    reach: number;
+    originX: number;
+    originY: number;
+    currentX: number;
+    currentY: number;
+  }): void {
+    if (!reading.active) {
+      this.dragGuide.classList.add('is-hidden');
+      return;
+    }
+    const dx = reading.currentX - reading.originX;
+    const dy = reading.currentY - reading.originY;
+    const away = Math.sqrt(dx * dx + dy * dy);
+
+    this.dragGuide.style.left = `${reading.originX}px`;
+    this.dragGuide.style.top = `${reading.originY}px`;
+
+    // Below the point where it starts to do anything there is nothing to
+    // point at, so the arrow waits rather than spinning about wildly.
+    if (away < 10) {
+      this.dragArrow.classList.add('is-waiting');
+      return;
+    }
+    this.dragArrow.classList.remove('is-waiting');
+    const shown = Math.min(away, reading.reach);
+    this.dragArrow.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+    this.dragShaft.style.width = `${shown}px`;
+    // Full deflection lights it up, so the limit can be felt as well as seen.
+    this.dragGuide.classList.toggle('is-full', away >= reading.reach - 1);
+    this.dragGuide.classList.remove('is-hidden');
+  }
+
   /**
    * Shows how the run compares with the best one so far.
    *
@@ -225,6 +274,7 @@ export class Hud {
   /** Puts the countdown back to the start for a fresh attempt. */
   reset(): void {
     this.gap.classList.add('is-hidden');
+    this.dragGuide.classList.add('is-hidden');
     this.lastCountdown = -1;
     this.lastFalls = 0;
     this.lastStallSecond = -1;

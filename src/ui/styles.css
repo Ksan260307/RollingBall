@@ -1333,3 +1333,79 @@ body {
   padding: 8px 14px;
   font-size: 0.85rem;
 }
+
+/*
+ * The arrow under the finger.
+ *
+ * It sits where the drag started and points where the finger went, which is
+ * exactly what the ball has been told to do. Kept faint on purpose: it is
+ * there to be glanced at, never to be looked at instead of the ball. It
+ * stops growing at a full push and lights up there, which is all the limit
+ * needs — a ring around it only got in the way of the course.
+ */
+.drag-guide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0.42;
+  transition: opacity 120ms linear;
+}
+
+.drag-guide.is-hidden {
+  display: none;
+}
+
+/* At full deflection it firms up, so the limit is visible as well as felt. */
+.drag-guide.is-full {
+  opacity: 0.72;
+}
+
+/* The arrow is one strip rotated about where the drag began. */
+.drag-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+.drag-arrow.is-waiting {
+  visibility: hidden;
+}
+
+.drag-shaft {
+  position: absolute;
+  left: 0;
+  top: -5px;
+  height: 10px;
+  border-radius: 5px;
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.15),
+    rgba(255, 255, 255, 0.92)
+  );
+}
+
+/* The head, drawn on the end of the strip. */
+.drag-shaft::after {
+  content: '';
+  position: absolute;
+  right: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-left: 18px solid rgba(255, 255, 255, 0.92);
+  border-top: 13px solid transparent;
+  border-bottom: 13px solid transparent;
+}
+
+.drag-guide.is-full .drag-shaft {
+  background: linear-gradient(to right, rgba(255, 209, 102, 0.2), var(--accent));
+}
+
+.drag-guide.is-full .drag-shaft::after {
+  border-left-color: var(--accent);
+}
+

@@ -541,7 +541,9 @@ function main(): void {
       if (active) {
         if (active === session && mode === 'playing') {
           const before = active.world.step;
-          active.update(delta, controls.read());
+          const asked = controls.read();
+          hud.showDrag(asked);
+          active.update(delta, asked);
           // The ghost takes exactly the steps the live run just took, so the
           // two stay level however the frame rate wanders.
           if (ghost) {

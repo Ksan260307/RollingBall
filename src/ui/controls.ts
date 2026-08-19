@@ -15,12 +15,32 @@ import { Controls } from '../core/input';
 /** How far the drag has to travel for a full push, in screen pixels. */
 const FULL_PUSH_PIXELS = 110;
 
+/**
+ * How far a finger can move before it counts as a drag at all, in pixels.
+ *
+ * A thumb resting on glass is never quite still, and without this the ball
+ * twitches while the player is only holding on. Everything past it is
+ * stretched back out, so the full range is still there to be reached.
+ */
+const DEAD_PIXELS = 7;
+
+/**
+ * How much finer the control is close to the middle.
+ *
+ * The push is bent by this power on the way out: small movements ask for
+ * less than they used to, which is where the careful steering happens, and
+ * a full-length drag still asks for everything.
+ */
+const FINE_NEAR_MIDDLE = 1.35;
+
 /** How much of a wheel notch counts as one step of zoom. */
 const WHEEL_STEP = 0.0016;
 
 export interface ControlReading extends Controls {
   /** True while a finger or the mouse button is down. */
   active: boolean;
+  /** How far a drag has to reach for a full push, for the on-screen guide. */
+  reach: number;
   /** Where the drag started, for drawing the on-screen guide. */
   originX: number;
   originY: number;
@@ -158,16 +178,33 @@ export class ControlReader {
     this.releaseAll();
   }
 
+  /**
+   * Keeps the middle of the drag within reach of the finger.
+   *
+   * Drag a long way past full and the middle follows, so easing back turns
+   * the ball straight away instead of doing nothing until the finger has
+   * retraced everything it overshot by. This is what stops a hard corner
+   * leaving the player with a control that has stopped answering.
+   */
+  private followFinger(): void {
+    const dx = this.currentX - this.originX;
+    const dy = this.currentY - this.originY;
+    const away = Math.sqrt(dx * dx + dy * dy);
+    if (away <= FULL_PUSH_PIXELS) return;
+    const pull = (away - FULL_PUSH_PIXELS) / away;
+    this.originX += dx * pull;
+    this.originY += dy * pull;
+  }
+
   /** What the player is asking for right now. */
   read(): ControlReading {
     let steer = 0;
     let push = 0;
 
     if (this.dragging) {
-      const dx = this.currentX - this.originX;
-      const dy = this.currentY - this.originY;
-      steer = clampUnit(dx / FULL_PUSH_PIXELS);
-      push = clampUnit(-dy / FULL_PUSH_PIXELS);
+      this.followFinger();
+      steer = shaped(this.currentX - this.originX);
+      push = shaped(-(this.currentY - this.originY));
     }
 
     if (this.keys.has('arrowleft') || this.keys.has('a')) steer -= 1;
@@ -183,6 +220,7 @@ export class ControlReader {
       push: Math.round(push * ONE),
       buttons: 0,
       active: this.dragging,
+      reach: FULL_PUSH_PIXELS,
       originX: this.originX,
       originY: this.originY,
       currentX: this.currentX,
@@ -205,4 +243,19 @@ export class ControlReader {
 
 function clampUnit(value: number): number {
   return value < -1 ? -1 : value > 1 ? 1 : value;
+}
+
+/**
+ * Turns a distance dragged into how hard the ball is asked to go.
+ *
+ * The first few pixels do nothing, what is left is stretched back over the
+ * whole range so full is still full, and the result is bent so that the
+ * middle of the range is finer than the ends.
+ */
+function shaped(pixels: number): number {
+  const size = Math.abs(pixels);
+  if (size <= DEAD_PIXELS) return 0;
+  const past = (size - DEAD_PIXELS) / (FULL_PUSH_PIXELS - DEAD_PIXELS);
+  const amount = Math.pow(clampUnit(past), FINE_NEAR_MIDDLE);
+  return pixels < 0 ? -amount : amount;
 }
