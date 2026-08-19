@@ -7,3 +7,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 *.tsbuildinfo
+
+# Films made by the promo recorder. Made on demand, not kept in the repo.
+promo/

@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { defineConfig } from 'vitest/config';
@@ -13,8 +13,14 @@ const base = process.env.BASE_PATH ?? '/';
 /** Where the courses are kept, and where the editor writes them back. */
 const COURSE_FILE = path.resolve(process.cwd(), 'src/game/courses.json');
 
+/** Where a recording of the game is written. */
+const FILM_DIR = path.resolve(process.cwd(), 'promo');
+
 /** Refuses anything far larger than a hand-made set of courses. */
 const MOST_BYTES = 2_000_000;
+
+/** A short recording of the game is allowed to be a great deal bigger. */
+const MOST_FILM_BYTES = 120_000_000;
 
 /**
  * Lets the course editor save its work straight into the project.
@@ -69,9 +75,66 @@ function courseSaving(): Plugin {
   };
 }
 
+/**
+ * Lets the promo recorder drop a finished film into the project.
+ *
+ * Like the course editor, this is a workshop tool: `apply: 'serve'` keeps it
+ * to the development server, so the published game has no way to write a
+ * file anywhere.
+ */
+function filmSaving(): Plugin {
+  return {
+    name: 'rolling-ball-film-saving',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use('/__film', (request, response, next) => {
+        if (request.method !== 'POST') {
+          next();
+          return;
+        }
+        const name = String(request.headers['x-film-name'] ?? 'promo.webm');
+        // Whatever the page asks for, it lands in one folder under a plain
+        // name: no wandering off into the rest of the disk.
+        const safe = path.basename(name).replace(/[^a-z0-9._-]/gi, '');
+        const chunks: Buffer[] = [];
+        let size = 0;
+        let tooBig = false;
+        request.on('data', (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > MOST_FILM_BYTES) {
+            tooBig = true;
+            request.destroy();
+            return;
+          }
+          chunks.push(chunk);
+        });
+        request.on('end', () => {
+          void (async () => {
+            response.setHeader('content-type', 'application/json');
+            if (tooBig || safe.length === 0) {
+              response.statusCode = 413;
+              response.end(JSON.stringify({ error: 'no' }));
+              return;
+            }
+            try {
+              await mkdir(FILM_DIR, { recursive: true });
+              await writeFile(path.join(FILM_DIR, safe), Buffer.concat(chunks));
+              response.statusCode = 200;
+              response.end(JSON.stringify({ saved: safe, bytes: size }));
+            } catch (error) {
+              response.statusCode = 400;
+              response.end(JSON.stringify({ error: String(error) }));
+            }
+          })();
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base,
-  plugins: [courseSaving()],
+  plugins: [courseSaving(), filmSaving()],
   build: {
     target: 'es2022',
     outDir: 'dist',
