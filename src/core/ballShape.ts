@@ -251,6 +251,29 @@ function countFilled(voxels: Uint8Array): number {
 /** The kinds of chaotic ball the workshop can throw together. */
 const RANDOM_STYLES = 24;
 
+/**
+ * How many ways a body can be finished off once it has been built.
+ *
+ * Every body can come out plain, pulled out of shape, hollowed into a
+ * shell, covered in studs, or sanded round. Each is a different ball to look
+ * at and a different ball to roll, and the last two in particular reach
+ * kinds of ball the bodies never made on their own: nothing was properly
+ * spiky before, and very little was properly round.
+ */
+const RANDOM_FINISHES = 5;
+
+/**
+ * How many ways a body can be put together before it is finished off.
+ *
+ * This axis is about how even the ball is, which is the thing that decides
+ * whether it will hold a line. Left to itself a body comes out lopsided as
+ * often as not; folding it against its own mirror makes it deliberately
+ * even; folding it against a turned copy of itself makes something more
+ * complicated than either. Three builds, five finishes and two dozen
+ * bodies is three hundred and sixty ways round.
+ */
+const RANDOM_BUILDS = 3;
+
 /** A whole number from the generator, as a decimal between -1 and 1. */
 function spread(rng: Generator): number {
   return rng.signedUnit() / ONE;
@@ -422,6 +445,224 @@ function paintRandomly(voxels: Uint8Array, rng: Generator, colour: number): void
       }
     }
   }
+}
+
+/**
+ * Pulls a shape out along one direction and squashes it in the others.
+ *
+ * A potato becomes a rugby ball; a ring becomes an oval. It reads as a
+ * different ball straight away, and it rolls like one too, because the
+ * distance from the middle to the floor now depends on which way up it is.
+ */
+function stretched(voxels: Uint8Array, axis: number, pull: number): Uint8Array {
+  const out = new Uint8Array(SHAPE_CELLS);
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        // Read from wherever this cell has been pulled away from.
+        const fx = axis === 0 ? (x - SHAPE_CENTRE) / pull : (x - SHAPE_CENTRE) * pull;
+        const fy = axis === 1 ? (y - SHAPE_CENTRE) / pull : (y - SHAPE_CENTRE) * pull;
+        const fz = axis === 2 ? (z - SHAPE_CENTRE) / pull : (z - SHAPE_CENTRE) * pull;
+        const cube = cellAt(
+          voxels,
+          Math.round(SHAPE_CENTRE + fx),
+          Math.round(SHAPE_CENTRE + fy),
+          Math.round(SHAPE_CENTRE + fz),
+        );
+        if (cube !== 0) out[cellIndex(x, y, z)] = cube;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Scoops the middle out and cuts a few windows, leaving a shell.
+ *
+ * Only the cubes with a filled cube on every side go: what is left is the
+ * outside of whatever was built, which keeps the character of the body
+ * while weighing a fraction of it.
+ */
+function hollowed(voxels: Uint8Array, rng: Generator): Uint8Array {
+  const out = Uint8Array.from(voxels);
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        if (voxels[cellIndex(x, y, z)] === 0) continue;
+        const buried =
+          cellAt(voxels, x - 1, y, z) !== 0 &&
+          cellAt(voxels, x + 1, y, z) !== 0 &&
+          cellAt(voxels, x, y - 1, z) !== 0 &&
+          cellAt(voxels, x, y + 1, z) !== 0 &&
+          cellAt(voxels, x, y, z - 1) !== 0 &&
+          cellAt(voxels, x, y, z + 1) !== 0;
+        if (buried) out[cellIndex(x, y, z)] = 0;
+      }
+    }
+  }
+  // A window or two, so it reads as hollow rather than merely light.
+  const windows = 1 + rng.below(3);
+  for (let window = 0; window < windows; window++) {
+    blob(
+      out,
+      SHAPE_CENTRE + spread(rng) * SHAPE_CENTRE,
+      SHAPE_CENTRE + spread(rng) * SHAPE_CENTRE,
+      SHAPE_CENTRE + spread(rng) * SHAPE_CENTRE,
+      SHAPE_CENTRE * (0.18 + unit(rng) * 0.2),
+      0,
+    );
+  }
+  return out;
+}
+
+/** Merges one shape into another, keeping whatever either of them had. */
+function mergeInto(into: Uint8Array, from: Uint8Array): void {
+  for (let i = 0; i < SHAPE_CELLS; i++) {
+    if (into[i] === 0 && from[i] !== 0) into[i] = from[i];
+  }
+}
+
+/**
+ * Folds a shape against its own mirror, so both sides match.
+ *
+ * An even ball turns about its own middle and goes where it is sent. This
+ * is how a chaotic shape gets to be even on purpose rather than by luck,
+ * and it is the difference between a ball that has to be fought and one
+ * that can be trusted.
+ */
+function mirrored(voxels: Uint8Array, axis: number): Uint8Array {
+  const out = Uint8Array.from(voxels);
+  const flipped = new Uint8Array(SHAPE_CELLS);
+  const last = SHAPE_SIZE - 1;
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        const cube = voxels[cellIndex(x, y, z)];
+        if (cube === 0) continue;
+        flipped[
+          cellIndex(axis === 0 ? last - x : x, axis === 1 ? last - y : y, axis === 2 ? last - z : z)
+        ] = cube;
+      }
+    }
+  }
+  mergeInto(out, flipped);
+  return out;
+}
+
+/**
+ * Folds a shape against a quarter-turned copy of itself.
+ *
+ * What comes out has more going on than the body did on its own — arms
+ * where there was one arm, corners where there was one corner — while still
+ * being recognisably built from the same thing.
+ */
+function twinned(voxels: Uint8Array, axis: number): Uint8Array {
+  const out = Uint8Array.from(voxels);
+  const turned = new Uint8Array(SHAPE_CELLS);
+  const middle = SHAPE_CENTRE;
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        const cube = voxels[cellIndex(x, y, z)];
+        if (cube === 0) continue;
+        const dx = x - middle;
+        const dy = y - middle;
+        const dz = z - middle;
+        // A quarter turn about the chosen way up.
+        const tx = axis === 0 ? dx : axis === 1 ? dz : dy;
+        const ty = axis === 0 ? dz : axis === 1 ? dy : -dx;
+        const tz = axis === 0 ? -dy : axis === 1 ? -dx : dz;
+        const px = Math.round(middle + tx);
+        const py = Math.round(middle + ty);
+        const pz = Math.round(middle + tz);
+        if (insideShape(px, py, pz)) turned[cellIndex(px, py, pz)] = cube;
+      }
+    }
+  }
+  mergeInto(out, turned);
+  return out;
+}
+
+/**
+ * Covers whatever was built in short studs.
+ *
+ * Nothing the bodies make on their own comes out properly spiky, and a
+ * spiky ball rolls quite unlike a smooth one, so this is a whole corner of
+ * the range that only exists because of this pass.
+ */
+function studded(voxels: Uint8Array, rng: Generator): Uint8Array {
+  const out = Uint8Array.from(voxels);
+  const middle = SHAPE_CENTRE;
+  const studs = 10 + rng.below(18);
+  for (let stud = 0; stud < studs; stud++) {
+    const dx = spread(rng);
+    const dy = spread(rng);
+    const dz = spread(rng);
+    const length = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+    // Walk out from the middle until the body ends, then keep going a
+    // little: the stud starts where the surface is, whatever shape it is.
+    let at = 0;
+    for (let step = 1; step <= SHAPE_CENTRE * 2; step++) {
+      const x = Math.round(middle + (dx / length) * step * 0.5);
+      const y = Math.round(middle + (dy / length) * step * 0.5);
+      const z = Math.round(middle + (dz / length) * step * 0.5);
+      if (cellAt(voxels, x, y, z) !== 0) at = step;
+    }
+    if (at === 0) continue;
+    const out2 = at * 0.5 + 1 + unit(rng) * 2.5;
+    prong(
+      out,
+      middle,
+      middle,
+      middle,
+      dx / length,
+      dy / length,
+      dz / length,
+      Math.round(out2),
+      1.5 + unit(rng) * 0.9,
+      1,
+    );
+  }
+  return out;
+}
+
+/**
+ * Sands the shape back to something much closer to a ball.
+ *
+ * Takes off everything past a chosen radius and fills in what is inside it,
+ * keeping only the parts of the body that stuck out far enough to survive.
+ * What comes out is round with a memory of what it was, which is a kind of
+ * ball the bodies almost never made by themselves.
+ */
+function rounded(voxels: Uint8Array, rng: Generator): Uint8Array {
+  const out = new Uint8Array(SHAPE_CELLS);
+  const middle = SHAPE_CENTRE;
+  const keep = SHAPE_CENTRE * (0.6 + unit(rng) * 0.3);
+  const core = keep * (0.55 + unit(rng) * 0.25);
+  let paint = 0;
+  for (let x = 0; x < SHAPE_SIZE && paint === 0; x++) {
+    for (let y = 0; y < SHAPE_SIZE && paint === 0; y++) {
+      for (let z = 0; z < SHAPE_SIZE && paint === 0; z++) {
+        paint = voxels[cellIndex(x, y, z)];
+      }
+    }
+  }
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        const dx = x - middle;
+        const dy = y - middle;
+        const dz = z - middle;
+        const far = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (far > keep) continue;
+        const was = voxels[cellIndex(x, y, z)];
+        // Solid in the middle; outside that, only where the body reached.
+        if (far <= core) out[cellIndex(x, y, z)] = was !== 0 ? was : paint || 8;
+        else if (was !== 0) out[cellIndex(x, y, z)] = was;
+      }
+    }
+  }
+  return out;
 }
 
 /**
@@ -924,6 +1165,45 @@ export function randomShape(seed: number, colour = 6): Uint8Array {
     }
   }
 
+  // First how it is put together, which decides how even it turns out.
+  let built: Uint8Array = voxels;
+  switch (rng.below(RANDOM_BUILDS)) {
+    case 1:
+      built = mirrored(voxels, rng.below(3));
+      break;
+    case 2:
+      built = twinned(voxels, rng.below(3));
+      break;
+    default:
+      break;
+  }
+  voxels.set(built);
+
+  // Then how it is finished off, which changes the kind of ball it is
+  // rather than merely nudging the one that was built.
+  let shaped: Uint8Array = voxels;
+  switch (rng.below(RANDOM_FINISHES)) {
+    case 1: {
+      // Pulled out one way, or squashed flat the same way.
+      const axis = rng.below(3);
+      const pull = unit(rng) < 0.5 ? 1.45 + unit(rng) * 0.5 : 0.55 + unit(rng) * 0.2;
+      shaped = stretched(voxels, axis, pull);
+      break;
+    }
+    case 2:
+      shaped = hollowed(voxels, rng);
+      break;
+    case 3:
+      shaped = studded(voxels, rng);
+      break;
+    case 4:
+      shaped = rounded(voxels, rng);
+      break;
+    default:
+      break;
+  }
+  voxels.set(shaped);
+
   // A few extra lumps or bites, whatever the style, so no two are alike.
   const extras = rng.below(4);
   for (let extra = 0; extra < extras; extra++) {
@@ -987,6 +1267,66 @@ export interface ShapeStats {
   spinResistance: number;
   /** Distance from the middle out to the furthest corner, for drawing. */
   reach: number;
+  /**
+   * How far the weight sits off the middle, from 0 to ONE.
+   *
+   * A ball with all its weight evenly spread turns about its own middle and
+   * holds whatever line it is put on. Put the weight to one side and the
+   * heavy part swings round as it rolls, throwing the ball off that line a
+   * little more with every turn. This is what stops an odd shape going
+   * where it is pointed.
+   *
+   * Measured as the distance from the middle of the block to the middle of
+   * the weight, as a share of how far the ball reaches.
+   */
+  lopsided: number;
+  /**
+   * How differently the ball turns depending on which way it is turning,
+   * from 0 to ONE.
+   *
+   * Weight gathered along one line is easy to turn about that line and hard
+   * to turn about the others: a rolling pin is the extreme case. A ball like
+   * that does not turn at a steady rate as it goes — it comes round easily
+   * for part of every turn and fights the rest of it.
+   *
+   * Measured by comparing how hard it is to turn about each of the three
+   * ways through the middle: a shape that answers the same in all three
+   * scores nothing, one that answers very differently scores near ONE.
+   */
+  spinSpread: number;
+}
+
+/**
+ * Where a weight has been placed inside the ball, if one has.
+ *
+ * Both numbers run from -1 to 1 across the ball: sideways and up. The
+ * middle, 0 and 0, is a ball with nothing added, which behaves exactly as
+ * its own shape says it should.
+ */
+export interface WeightAt {
+  sideways: number;
+  up: number;
+}
+
+/** A ball with no weight put in it. */
+export const WEIGHT_MIDDLE: WeightAt = { sideways: 0, up: 0 };
+
+/**
+ * How far off the middle a weight pulls the balance point, at full tilt.
+ *
+ * A share of the ball's own reach, chosen so that the whole of the control
+ * does something: at the very edge the ball is as unruly as the rules allow,
+ * and halfway out it is halfway there. Any further and most of the control
+ * would be wasted on a ball that is already as bad as it can get.
+ */
+const WEIGHT_REACH = 0.22;
+
+/** Reads a placed weight, ignoring anything that is not a real position. */
+export function readWeightAt(value: unknown): WeightAt {
+  const held = value as Partial<WeightAt> | undefined;
+  const one = (n: unknown): number =>
+    typeof n === 'number' && Number.isFinite(n) ? Math.min(1, Math.max(-1, n)) : 0;
+  return { sideways: one(held?.sideways), up: one(held?.up) };
 }
 
 /** The measurements of the ball everybody starts with, used as the yardstick. */
@@ -1006,8 +1346,19 @@ function countCubes(voxels: Uint8Array): number {
  * about the same distance from the middle, while a cube or a spiky shape
  * scores lower and therefore rolls less predictably.
  */
-export function measureShape(voxels: Uint8Array): ShapeStats {
+export function measureShape(
+  voxels: Uint8Array,
+  weightAt: WeightAt = WEIGHT_MIDDLE,
+): ShapeStats {
   let cubes = 0;
+  // Where all the weight adds up to, in half-cube steps.
+  let leanX = 0;
+  let leanY = 0;
+  let leanZ = 0;
+  // How hard the shape is to turn about each of the three ways through it.
+  let turnAboutX = 0;
+  let turnAboutY = 0;
+  let turnAboutZ = 0;
   let longestSquared = 0;
   let surfaceCount = 0;
   let surfaceTotalSquared = 0;
@@ -1041,6 +1392,17 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
         const midY = 2 * (y - SHAPE_CENTRE);
         const midZ = 2 * (z - SHAPE_CENTRE);
         centreTotalSquared += midX * midX + midY * midY + midZ * midZ;
+
+        // And the same split three ways, for how hard it is to turn about
+        // each line through the middle.
+        turnAboutX += midY * midY + midZ * midZ;
+        turnAboutY += midX * midX + midZ * midZ;
+        turnAboutZ += midX * midX + midY * midY;
+
+        // And where the weight sits overall, for how lopsided it is.
+        leanX += midX;
+        leanY += midY;
+        leanZ += midZ;
 
         // The outer faces of this cube, again in half-cube steps.
         const faceX = Math.abs(midX) + 1;
@@ -1088,6 +1450,8 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
       smoothness: ONE,
       proudShare: 0,
       spinResistance: Math.round(0.4 * ONE),
+      lopsided: 0,
+      spinSpread: 0,
     };
   }
 
@@ -1129,6 +1493,30 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
   const proudShare = clamp(div(proud, Math.max(1, surfaceCount)), 0, ONE);
 
   const floor = Math.round((CUBE_METRES / 2) * ONE);
+  // How far the middle of the weight sits from the middle of the block,
+  // as a share of the ball's own reach. Everything stays in half-cube steps
+  // until the last division, so no fractions creep in.
+  const halfCubes = Math.max(1, cubes);
+  const offX = leanX / halfCubes;
+  const offY = leanY / halfCubes;
+  const offZ = leanZ / halfCubes;
+  // A weight put in by hand moves the balance point the same way a lump of
+  // cubes on one side would, and is felt in exactly the same way.
+  const bodyOff = Math.max(1, outermost);
+  const placedX = weightAt.sideways * WEIGHT_REACH * bodyOff;
+  const placedY = weightAt.up * WEIGHT_REACH * bodyOff;
+  const withX = offX + placedX;
+  const withY = offY + placedY;
+  const offBy = Math.sqrt(withX * withX + withY * withY + offZ * offZ);
+  const lopsided = Math.min(ONE, Math.round((offBy / bodyOff) * ONE));
+
+  // How lopsided the turning is: the gap between the easiest way round and
+  // the hardest, as a share of the hardest.
+  const hardest = Math.max(turnAboutX, turnAboutY, turnAboutZ);
+  const easiest = Math.min(turnAboutX, turnAboutY, turnAboutZ);
+  const spinSpread =
+    hardest > 0 ? Math.min(ONE, Math.round(((hardest - easiest) / hardest) * ONE)) : 0;
+
   return {
     cubes,
     radius: Math.max(floor, radius),
@@ -1137,6 +1525,8 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
     smoothness,
     proudShare,
     spinResistance,
+    lopsided,
+    spinSpread,
   };
 }
 

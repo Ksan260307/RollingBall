@@ -298,7 +298,7 @@ function main(): void {
     session = new Session({
       stage,
       course,
-      ball: measureShape(design.voxels),
+      ball: measureShape(design.voxels, design.weightAt),
       countdownSeconds: 3,
     });
     demo = null;
@@ -364,7 +364,7 @@ function main(): void {
     if (!stored) return;
     try {
       ghost = new Ghost(
-        { stage, course, ball: measureShape(design.voxels), countdownSeconds: 3 },
+        { stage, course, ball: measureShape(design.voxels, design.weightAt), countdownSeconds: 3 },
         stored,
       );
       void view.setGhostBall(design);
@@ -405,7 +405,7 @@ function main(): void {
     demo = new Session({
       stage,
       course: courseFor(stage),
-      ball: measureShape(design.voxels),
+      ball: measureShape(design.voxels, design.weightAt),
       countdownSeconds: 0,
     });
     view.prepareScenery(demo.world);
@@ -429,7 +429,7 @@ function main(): void {
       options: {
         stage: currentStage,
         course: courseFor(currentStage),
-        ball: measureShape(design.voxels),
+        ball: measureShape(design.voxels, design.weightAt),
       },
       controls: session.replay(),
       finished: won,

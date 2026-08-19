@@ -10,6 +10,9 @@
 import {
   MIXED_LIMIT,
   SHAPE_CELLS,
+  WEIGHT_MIDDLE,
+  type WeightAt,
+  readWeightAt,
   defaultShape,
   isColour,
   shapeFromText,
@@ -132,10 +135,19 @@ export interface BallDesign {
   shine: number;
   /** Colours mixed by hand for this ball, as `#rrggbb`. */
   mixed: string[];
+  /** Where a weight has been put inside the ball. */
+  weightAt: WeightAt;
 }
 
 export function defaultBall(): BallDesign {
-  return { voxels: defaultShape(), photo: null, photoStrength: 0.85, shine: 0.35, mixed: [] };
+  return {
+    voxels: defaultShape(),
+    photo: null,
+    photoStrength: 0.85,
+    shine: 0.35,
+    mixed: [],
+    weightAt: { ...WEIGHT_MIDDLE },
+  };
 }
 
 export function loadBall(): BallDesign {
@@ -148,6 +160,7 @@ export function loadBall(): BallDesign {
       photoStrength?: number;
       shine?: number;
       mixed?: unknown;
+      weightAt?: unknown;
     };
     const voxels = parsed.shape ? readShape(parsed.shape) : defaultShape();
     if (voxels.length !== SHAPE_CELLS) return defaultBall();
@@ -163,6 +176,7 @@ export function loadBall(): BallDesign {
       mixed: Array.isArray(parsed.mixed)
         ? parsed.mixed.filter(isColour).slice(0, MIXED_LIMIT)
         : [],
+      weightAt: readWeightAt(parsed.weightAt),
     };
   } catch {
     return defaultBall();
@@ -178,6 +192,7 @@ export function saveBall(design: BallDesign): void {
       photoStrength: design.photoStrength,
       shine: design.shine,
       mixed: design.mixed,
+      weightAt: design.weightAt,
     }),
   );
 }

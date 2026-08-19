@@ -1236,3 +1236,100 @@ body {
 .hud-gap.is-behind {
   color: #ff8f8f;
 }
+
+/*
+ * Where the weight sits inside the ball.
+ *
+ * The pad is the ball seen from behind, so dragging the dot left really does
+ * put the weight on the left. It is a handling choice, not a decoration, so
+ * it says out loud how unbalanced the ball has become.
+ */
+.weight-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+
+.weight-head {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.weight-label {
+  font-weight: 700;
+}
+
+.weight-note {
+  margin-left: auto;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.weight-panel.is-off-centre .weight-note {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.weight-pad {
+  position: relative;
+  width: min(170px, 60vw);
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.16), rgba(0, 0, 0, 0.32));
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* Crosshairs, so the middle can be found by eye. */
+.weight-cross::before,
+.weight-cross::after {
+  content: '';
+  position: absolute;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.weight-cross::before {
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 1px;
+}
+
+.weight-cross::after {
+  top: 8%;
+  bottom: 8%;
+  left: 50%;
+  width: 1px;
+}
+
+.weight-dot {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.weight-buttons {
+  display: flex;
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.weight-buttons .button {
+  padding: 8px 14px;
+  font-size: 0.85rem;
+}

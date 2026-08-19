@@ -16,6 +16,7 @@ import {
   cubeShape,
   defaultShape,
   measureShape,
+  readWeightAt,
   pebbleShape,
   randomShape,
 } from '../src/core/ballShape';
@@ -269,6 +270,31 @@ describe('the chaotic ball', () => {
       expect(runFor(randomShape(seed))).toBeGreaterThan(round);
     }
   });
+
+  it('costs a boxy ball most of the run again', () => {
+    // The shape you build is meant to be the biggest decision you make, not
+    // a detail. A box down the gentlest course takes getting on for twice
+    // what a proper ball takes; if that ever shrinks back to a few seconds,
+    // building a ball has stopped mattering.
+    const stage = STAGES[0];
+    const runFor = (voxels: Uint8Array): number => {
+      const world = new World({
+        course: courseFor(stage),
+        seed: stage.seed,
+        ball: measureShape(voxels),
+        breeze: stage.breeze,
+        countdownSeconds: 0,
+      });
+      return runWithAutopilot(world, 240).seconds;
+    };
+    const round = runFor(defaultShape());
+    const boxy = runFor(cubeShape());
+    const pebble = runFor(pebbleShape());
+
+    expect(boxy).toBeGreaterThan(round * 1.8);
+    // A small round ball is still a round ball: nearly as quick.
+    expect(pebble).toBeLessThan(round * 1.35);
+  });
 });
 
 describe('the rules stay repeatable with bumps in play', () => {
@@ -290,5 +316,243 @@ describe('the rules stay repeatable with bumps in play', () => {
     const world = runOn(lumpyShape(), 9, 6);
     expect(Number.isInteger(world.bumpPhase[0])).toBe(true);
     expect(Number.isInteger(world.velocityY[0])).toBe(true);
+  });
+});
+
+describe('a shape that will not roll straight', () => {
+  /** How far the ball wanders sideways down a wide, straight slope. */
+  function driftOf(voxels: Uint8Array): number {
+    // Wide and straight, with no steering at all: anything sideways that
+    // happens is the ball's own doing and nothing else's.
+    const world = new World({
+      course: buildCourse([{ length: 90, drop: 6, width: 24 }], 0),
+      seed: 1,
+      ball: measureShape(voxels),
+      countdownSeconds: 0,
+    });
+    const straight = packControls({ steer: 0, push: 0, buttons: 0 });
+    let drift = 0;
+    for (let i = 0; i < 120 * 40 && world.state[0] === RunState.Rolling; i++) {
+      world.advance([straight]);
+      drift = Math.max(drift, Math.abs(toNumber(world.sideways[0])));
+    }
+    return drift;
+  }
+
+  it('sends a round ball exactly where it is pointed', () => {
+    // The one that must not wander. If a properly built ball drifts, the
+    // game is fighting the player rather than the shape they chose.
+    expect(driftOf(defaultShape())).toBeLessThan(0.05);
+    expect(driftOf(pebbleShape())).toBeLessThan(0.3);
+  });
+
+  it('will not let a boxy ball hold a line', () => {
+    expect(driftOf(cubeShape())).toBeGreaterThan(0.8);
+  });
+
+  it('wanders whenever the shape says it should, and only then', () => {
+    // Naming seeds would be wrong: the generator can sand a ball round on
+    // purpose, and a round ball is meant to go straight whatever seed made
+    // it. What must hold is that the wandering follows the shape.
+    let wandering = 0;
+    for (let seed = 1; seed <= 30; seed++) {
+      const shape = randomShape(seed);
+      const veer = toNumber(ballFeelFrom(measureShape(shape)).veer);
+      const drift = driftOf(shape);
+      if (veer > 0.3) {
+        expect(drift).toBeGreaterThan(0.3);
+        wandering++;
+      }
+      if (veer < 0.02) expect(drift).toBeLessThan(0.3);
+    }
+    // And most chaotic balls do wander: this is the ordinary case, not a
+    // corner of the range.
+    expect(wandering).toBeGreaterThan(15);
+  });
+
+  it('wanders further the more lopsided the ball is', () => {
+    // Weight sitting off the middle is the strongest reason of the lot, so
+    // the ball with most of it should wander most. The two are picked by
+    // measuring rather than by naming seeds: the generator is free to
+    // change what any given seed makes, and this must hold regardless.
+    let worst = { lopsided: -1, shape: randomShape(1) };
+    let best = { lopsided: Number.POSITIVE_INFINITY, shape: randomShape(1) };
+    for (let seed = 1; seed <= 40; seed++) {
+      const shape = randomShape(seed);
+      const lopsided = toNumber(measureShape(shape).lopsided);
+      if (lopsided > worst.lopsided) worst = { lopsided, shape };
+      if (lopsided < best.lopsided) best = { lopsided, shape };
+    }
+    expect(worst.lopsided).toBeGreaterThan(best.lopsided);
+    expect(driftOf(worst.shape)).toBeGreaterThan(driftOf(best.shape));
+  });
+
+  it('measures a ball built evenly as not lopsided at all', () => {
+    for (const shape of [defaultShape(), pebbleShape(), cubeShape()]) {
+      expect(measureShape(shape).lopsided).toBe(0);
+    }
+  });
+
+  it('wanders the same way every time', () => {
+    // A pull that cannot be learnt is just noise. The same ball on the same
+    // slope must wander exactly the same way, or none of it is fair.
+    expect(driftOf(randomShape(17))).toBe(driftOf(randomShape(17)));
+  });
+});
+
+describe('a ball that does not run smoothly', () => {
+  /** How unevenly the ball runs down a straight slope, against its speed. */
+  function unevenness(voxels: Uint8Array): number {
+    const world = new World({
+      course: buildCourse([{ length: 90, drop: 6, width: 24 }], 0),
+      seed: 1,
+      ball: measureShape(voxels),
+      countdownSeconds: 0,
+    });
+    const straight = packControls({ steer: 0, push: 0, buttons: 0 });
+    const speeds: number[] = [];
+    for (let i = 0; i < 120 * 40 && world.state[0] === RunState.Rolling; i++) {
+      world.advance([straight]);
+      if (i > 240) speeds.push(toNumber(world.speedFor(0)));
+    }
+    // Peak to trough over each half second, against the average.
+    const span = 60;
+    let total = 0;
+    let windows = 0;
+    for (let i = 0; i + span < speeds.length; i += span) {
+      let low = Infinity;
+      let high = 0;
+      let sum = 0;
+      for (let j = i; j < i + span; j++) {
+        low = Math.min(low, speeds[j]);
+        high = Math.max(high, speeds[j]);
+        sum += speeds[j];
+      }
+      const mean = sum / span;
+      if (mean > 1) {
+        total += (high - low) / mean;
+        windows++;
+      }
+    }
+    return windows > 0 ? total / windows : 0;
+  }
+
+  it('measures an evenly built ball as turning the same way round whichever way', () => {
+    // Turning a sphere, a cube or a small round ball about any line through
+    // the middle is the same job, so there is nothing here to be uneven.
+    for (const shape of [defaultShape(), cubeShape(), pebbleShape()]) {
+      expect(measureShape(shape).spinSpread).toBe(0);
+    }
+  });
+
+  it('finds shapes that are far easier to turn one way than another', () => {
+    // Weight gathered along one line — a roller, a slab, a ring — should
+    // come out plainly uneven, or the measure is not doing its job.
+    let most = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      most = Math.max(most, toNumber(measureShape(randomShape(seed)).spinSpread));
+    }
+    expect(most).toBeGreaterThan(0.5);
+  });
+
+  it('makes an unevenly turning ball run in surges', () => {
+    // The point of measuring it: it has to be felt. A ball that is much
+    // easier to turn one way runs visibly less smoothly than a round one.
+    const round = unevenness(defaultShape());
+    let worst = 0;
+    let worstShape = defaultShape();
+    for (let seed = 1; seed <= 60; seed++) {
+      const shape = randomShape(seed);
+      const spread = toNumber(measureShape(shape).spinSpread);
+      if (spread > worst) {
+        worst = spread;
+        worstShape = shape;
+      }
+    }
+    expect(worst).toBeGreaterThan(0.5);
+    expect(unevenness(worstShape)).toBeGreaterThan(round * 3);
+  });
+
+  it('gives back over a turn what it takes, rather than merely slowing', () => {
+    // An uneven ball is meant to run unevenly, not to run slowly: the drag
+    // already covers slow. Down a straight slope it should still get going.
+    let worst = 0;
+    let worstShape = defaultShape();
+    for (let seed = 1; seed <= 60; seed++) {
+      const shape = randomShape(seed);
+      const spread = toNumber(measureShape(shape).spinSpread);
+      if (spread > worst) {
+        worst = spread;
+        worstShape = shape;
+      }
+    }
+    const world = new World({
+      course: buildCourse([{ length: 90, drop: 8, width: 24 }], 0),
+      seed: 1,
+      ball: measureShape(worstShape),
+      countdownSeconds: 0,
+    });
+    for (let i = 0; i < 120 * 12; i++) {
+      world.advance([packControls({ steer: 0, push: 0, buttons: 0 })]);
+    }
+    expect(toNumber(world.travelled[0])).toBeGreaterThan(20);
+  });
+});
+
+describe('putting a weight inside the ball', () => {
+  it('leaves a ball with nothing in it exactly as it was', () => {
+    const plain = measureShape(defaultShape());
+    const middle = measureShape(defaultShape(), { sideways: 0, up: 0 });
+    expect(middle.lopsided).toBe(plain.lopsided);
+    expect(middle.lopsided).toBe(0);
+  });
+
+  it('unbalances the ball by however far out the weight is put', () => {
+    // The whole of the control has to do something: halfway out should be
+    // about halfway to as bad as it gets, not already at the limit.
+    const at = (sideways: number): number =>
+      toNumber(ballFeelFrom(measureShape(defaultShape(), { sideways, up: 0 })).veer);
+    expect(at(0)).toBe(0);
+    expect(at(0.5)).toBeGreaterThan(0.35);
+    expect(at(0.5)).toBeLessThan(0.65);
+    expect(at(1)).toBeGreaterThan(0.9);
+  });
+
+  it('counts a weight up as much as a weight to the side', () => {
+    // Which way it is put decides which way the ball is thrown; how far out
+    // it is put decides how hard. The ball is turning over as it goes, so
+    // nothing about it stays pointing the same way for long.
+    const side = measureShape(defaultShape(), { sideways: 1, up: 0 }).lopsided;
+    const up = measureShape(defaultShape(), { sideways: 0, up: 1 }).lopsided;
+    expect(up).toBe(side);
+  });
+
+  it('makes a properly round ball wander once a weight is in it', () => {
+    // This is the point of the control: a round ball is the one that goes
+    // where it is sent, and putting a weight in it takes that away.
+    const drift = (weightAt: { sideways: number; up: number }): number => {
+      const world = new World({
+        course: buildCourse([{ length: 90, drop: 6, width: 24 }], 0),
+        seed: 1,
+        ball: measureShape(defaultShape(), weightAt),
+        countdownSeconds: 0,
+      });
+      let most = 0;
+      for (let i = 0; i < 120 * 40 && world.state[0] === RunState.Rolling; i++) {
+        world.advance([packControls({ steer: 0, push: 0, buttons: 0 })]);
+        most = Math.max(most, Math.abs(toNumber(world.sideways[0])));
+      }
+      return most;
+    };
+    expect(drift({ sideways: 0, up: 0 })).toBeLessThan(0.05);
+    expect(drift({ sideways: 1, up: 0 })).toBeGreaterThan(1);
+  });
+
+  it('ignores a weight position that is not one', () => {
+    // Saved balls get hand-edited and come from older versions.
+    expect(readWeightAt(undefined)).toEqual({ sideways: 0, up: 0 });
+    expect(readWeightAt('over there')).toEqual({ sideways: 0, up: 0 });
+    expect(readWeightAt({ sideways: Number.NaN, up: 4 })).toEqual({ sideways: 0, up: 1 });
+    expect(readWeightAt({ sideways: -9, up: -0.5 })).toEqual({ sideways: -1, up: -0.5 });
   });
 });

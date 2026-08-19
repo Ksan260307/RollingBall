@@ -16,7 +16,7 @@
  */
 
 import { Course, PointFlag, Surface, placeOnCourse } from './course';
-import { ONE, abs, clamp, div, length3, mul, sign } from './fixed';
+import { ONE, abs, clamp, div, length3, mul, sign, sine } from './fixed';
 import {
   Triple,
   dot,
@@ -204,13 +204,59 @@ const PROUD_WEIGHT = Math.round(26 * ONE);
 const BUMP_SPACING = Math.round(1.5 * ONE);
 
 /** How hard a bump throws the ball up, per unit of bumpiness and speed. */
-const BUMP_LIFT = Math.round(0.16 * ONE);
+const BUMP_LIFT = Math.round(0.19 * ONE);
 
 /** How much speed each bump costs, as a share of the throw. */
-const BUMP_LOSS = Math.round(0.24 * ONE);
+const BUMP_LOSS = Math.round(0.28 * ONE);
 
 /** Below this speed the ball rolls over its bumps rather than tripping on them. */
 const BUMP_FLOOR = Math.round(1.5 * ONE);
+
+/**
+ * How much the weight sitting off-centre counts towards wandering.
+ *
+ * Being off-centre is measured as a share of the ball's reach, and even a
+ * badly lopsided design only lands around a tenth of that, so it is worth a
+ * good deal each.
+ */
+const LEAN_WEIGHT = Math.round(4.5 * ONE);
+
+/** How much being generally knobbly counts towards it as well. */
+const KNOBBLY_WEIGHT = Math.round(0.55 * ONE);
+
+/** How hard a wandering ball is thrown off its line, per unit of speed. */
+const VEER_PUSH = Math.round(0.014 * ONE);
+
+/**
+ * How far the ball travels for one full swing of the wander, in metres.
+ *
+ * Slow enough to read as the ball pulling off its line and having to be
+ * caught, rather than as a shiver.
+ */
+const VEER_WAVELENGTH = Math.round(9 * ONE);
+
+/**
+ * How hard the weight inside a lopsided ball drives it along, per unit of
+ * speed, as that weight falls and climbs again.
+ */
+const SURGE_PUSH = Math.round(0.05 * ONE);
+
+/**
+ * How much a ball that turns unevenly fights part of every turn.
+ *
+ * It holds the ball back through the hard part of every turn and lets it
+ * away through the easy part, so the ball comes round in surges rather than
+ * at a steady rate. Over a whole turn it costs nothing.
+ */
+const FIGHT_DRAG = Math.round(0.03 * ONE);
+
+/**
+ * How far a ball travels in one turn, as a multiple of what it rests on.
+ *
+ * The distance round the outside, which is what a rolling ball lays down on
+ * the floor in one revolution.
+ */
+const TURN_DISTANCE = Math.round(2 * Math.PI * ONE);
 
 /** How each kind of floor behaves. */
 interface FloorBehaviour {
@@ -271,6 +317,32 @@ export interface BallFeel {
    * side genuinely worse to roll rather than merely different.
    */
   bumpiness: number;
+  /**
+   * How badly the ball throws itself off a straight line, from 0 to ONE.
+   *
+   * A ball whose weight sits off the middle swings that weight around as it
+   * rolls, and each turn pushes it a little to one side. A knobbly one does
+   * the same by meeting the floor on a different corner each time. Either
+   * way it will not hold the line you put it on, and has to be steered.
+   */
+  veer: number;
+  /**
+   * How hard the ball lurches along as it turns, from 0 to ONE.
+   *
+   * The weight inside a lopsided ball falls through the bottom of every
+   * turn and has to be lifted back over the top. Falling drives the ball
+   * on; climbing holds it back. It averages out over a turn and is felt the
+   * whole way: the ball surges rather than running smoothly.
+   */
+  surge: number;
+  /**
+   * How unevenly the ball comes round, from 0 to ONE.
+   *
+   * Weight gathered along one line makes a ball easy to turn one way and
+   * hard the others, so it fights part of every turn. Twice per turn, not
+   * once: turning about a line is the same job whichever end is up.
+   */
+  spinSpread: number;
 }
 
 /** Turns a measured design into the numbers the physics uses. */
@@ -290,9 +362,12 @@ export function ballFeelFrom(stats: ShapeStats): BallFeel {
     smoothness: stats.smoothness,
     spinResistance: stats.spinResistance,
     gripShare: gripShare(stats.spinResistance),
-    gripScale: Math.round(0.4 * ONE) + mul(Math.round(0.6 * ONE), evenness),
-    dragScale: ONE + mul(Math.round(0.85 * ONE), bumpiness),
+    gripScale: Math.round(0.32 * ONE) + mul(Math.round(0.68 * ONE), evenness),
+    dragScale: ONE + mul(Math.round(1.3 * ONE), bumpiness),
     bumpiness,
+    veer: clamp(mul(LEAN_WEIGHT, stats.lopsided) + mul(KNOBBLY_WEIGHT, bumpiness), 0, ONE),
+    surge: clamp(mul(LEAN_WEIGHT, stats.lopsided), 0, ONE),
+    spinSpread: stats.spinSpread,
   };
 }
 
@@ -827,6 +902,8 @@ export class World {
       this.applyGrip(player, upX, upY, upZ, hold, true);
       this.applyRollingDrag(player, upX, upY, upZ, floor, pressing);
       this.tripOverBumps(player, upX, upY, upZ, where.travelled);
+      this.wanderOffLine(player, upX, upY, upZ, where.travelled);
+      this.turnUnevenly(player, where.travelled);
     } else {
       // Off the ground the spin simply carries on.
       this.spinX[player] = mul(this.spinX[player], AIR_SPIN_KEEP);
@@ -1015,6 +1092,94 @@ export class World {
     this.velocityX[player] -= div(mul(this.velocityX[player], drop), speed);
     this.velocityY[player] -= div(mul(this.velocityY[player], drop), speed);
     this.velocityZ[player] -= div(mul(this.velocityZ[player], drop), speed);
+  }
+
+  /**
+   * Pushes the ball off the line it is on, by however much its shape says.
+   *
+   * The push swings from one side to the other as the ball travels, because
+   * that is what the weight inside it is doing: coming round, pulling one
+   * way, going over the top, pulling the other. A properly round ball has
+   * nothing to swing and goes exactly where it is sent.
+   *
+   * It is a push, not a steer: the ball can be held on line by working at
+   * it, which is the whole point of building an awkward one.
+   */
+  private wanderOffLine(
+    player: number,
+    upX: number,
+    upY: number,
+    upZ: number,
+    travelled: number,
+  ): void {
+    if (this.feel.veer <= 0) return;
+    const speed = this.speedFor(player);
+    if (speed <= BUMP_FLOOR) return;
+
+    // Sideways is across the way it is going and across the way up.
+    const vx = this.velocityX[player];
+    const vy = this.velocityY[player];
+    const vz = this.velocityZ[player];
+    let sideX = mul(upY, vz) - mul(upZ, vy);
+    let sideY = mul(upZ, vx) - mul(upX, vz);
+    let sideZ = mul(upX, vy) - mul(upY, vx);
+    const sideLength = length3(sideX, sideY, sideZ);
+    if (sideLength <= 0) return;
+    sideX = div(sideX, sideLength);
+    sideY = div(sideY, sideLength);
+    sideZ = div(sideZ, sideLength);
+
+    // Where the weight has got to in its swing, from how far the ball has
+    // come. The same ball on the same course always swings the same way.
+    const phase = div(travelled, VEER_WAVELENGTH) & 0xffff;
+    const swing = sine(phase);
+
+    const push = mul(mul(mul(VEER_PUSH, this.feel.veer), speed), swing);
+    this.velocityX[player] += mul(sideX, push);
+    this.velocityY[player] += mul(sideY, push);
+    this.velocityZ[player] += mul(sideZ, push);
+  }
+
+  /**
+   * Drives the ball on and holds it back as its own weight goes round.
+   *
+   * Two things happen here, and they happen at different rates on purpose.
+   * The weight inside a lopsided ball comes round once per turn: falling on
+   * the way down, climbing on the way up. How hard the ball is to turn goes
+   * round twice per turn, because turning about a line is the same work
+   * whichever end of it is uppermost.
+   *
+   * Neither adds energy over a whole turn. What they do is stop the ball
+   * running smoothly, which is what an awkward shape does.
+   */
+  private turnUnevenly(player: number, travelled: number): void {
+    const feel = this.feel;
+    if (feel.surge <= 0 && feel.spinSpread <= 0) return;
+    const speed = this.speedFor(player);
+    if (speed <= BUMP_FLOOR) return;
+
+    // Where the ball has got to in its own turn. One turn carries it the
+    // distance round its outside, so this is the same for any size of ball.
+    const roll = Math.max(1, mul(feel.radius, TURN_DISTANCE));
+    const turn = div(travelled, roll) & 0xffff;
+
+    let along = 0;
+    if (feel.surge > 0) {
+      // The weight falling and climbing, once per turn.
+      along += mul(mul(mul(SURGE_PUSH, feel.surge), speed), sine(turn));
+    }
+    if (feel.spinSpread > 0) {
+      // Coming round easily on one part of the turn and fighting the next,
+      // twice per turn. It gives back what it takes: the ball ends the turn
+      // where it would have been, having got there unevenly.
+      const fight = sine((turn * 2) & 0xffff);
+      along += mul(mul(mul(FIGHT_DRAG, feel.spinSpread), speed), fight);
+    }
+    if (along === 0) return;
+
+    this.velocityX[player] += div(mul(this.velocityX[player], along), speed);
+    this.velocityY[player] += div(mul(this.velocityY[player], along), speed);
+    this.velocityZ[player] += div(mul(this.velocityZ[player], along), speed);
   }
 
   /** Keeps travel and spin inside sensible limits. */

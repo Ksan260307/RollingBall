@@ -110,6 +110,11 @@ export class BallEditor {
   private undoButton: HTMLButtonElement | null = null;
   private readonly paletteRow: HTMLElement;
   private readonly mixWindow: HTMLElement;
+  /** Where the weight inside the ball is placed. */
+  private readonly weightPanel: HTMLElement;
+  private readonly weightPad: HTMLElement;
+  private readonly weightDot: HTMLElement;
+  private readonly weightNote: HTMLElement;
   private mixing = false;
   private mixRed = 255;
   private mixGreen = 120;
@@ -133,6 +138,26 @@ export class BallEditor {
     this.readout = el('div', { class: 'editor-readout' });
     this.paletteRow = el('div', { class: 'palette' });
     this.mixWindow = el('div', { class: 'mixer is-closed' });
+    this.weightDot = el('div', { class: 'weight-dot' });
+    this.weightPad = el(
+      'div',
+      { class: 'weight-pad', attrs: { role: 'application', 'aria-label': TEXT.weightAt } },
+      el('div', { class: 'weight-cross' }),
+      this.weightDot,
+    );
+    this.weightNote = el('span', { class: 'weight-note' });
+    this.weightPanel = el(
+      'div',
+      { class: 'weight-panel' },
+      el(
+        'div',
+        { class: 'weight-head' },
+        el('span', { class: 'weight-label', text: TEXT.weightAt }),
+        this.weightNote,
+      ),
+      this.weightPad,
+      el('div', { class: 'weight-buttons' }, button(TEXT.weightMiddle, () => this.setWeight(0, 0), 'ghost')),
+    );
     this.toolRow = el('div', { class: 'tool-row' });
     this.noticeRow = el('div', { class: 'editor-notice' });
     this.fileInput = el('input', {
@@ -144,6 +169,8 @@ export class BallEditor {
     this.buildTools();
     this.buildPalette();
     this.buildMixer();
+    this.setUpWeightPad();
+    this.showWeight();
 
     this.root = el(
       'section',
@@ -196,6 +223,7 @@ export class BallEditor {
               this.design.shine = value;
               this.rebuild();
             }),
+            this.weightPanel,
             this.statsRow,
             this.noticeRow,
             el(
@@ -317,6 +345,56 @@ export class BallEditor {
         }),
       );
     }
+  }
+
+  /**
+   * Lets the weight inside the ball be dragged about.
+   *
+   * The pad is the ball seen from behind: left and right across, up and
+   * down the other way. Where the weight sits decides how the ball behaves
+   * on a slope, so this is a handling choice rather than a decoration.
+   */
+  private setUpWeightPad(): void {
+    const place = (event: PointerEvent): void => {
+      const box = this.weightPad.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) return;
+      const across = ((event.clientX - box.left) / box.width) * 2 - 1;
+      // Screen coordinates run downwards; the ball does not.
+      const upwards = 1 - ((event.clientY - box.top) / box.height) * 2;
+      this.setWeight(across, upwards);
+    };
+
+    this.weightPad.addEventListener('pointerdown', (event) => {
+      this.weightPad.setPointerCapture(event.pointerId);
+      place(event);
+      event.preventDefault();
+    });
+    this.weightPad.addEventListener('pointermove', (event) => {
+      if (!this.weightPad.hasPointerCapture(event.pointerId)) return;
+      place(event);
+    });
+    this.weightPad.addEventListener('pointerup', (event) => {
+      this.weightPad.releasePointerCapture(event.pointerId);
+    });
+  }
+
+  /** Puts the weight somewhere, and works out what that does to the ball. */
+  private setWeight(sideways: number, up: number): void {
+    const hold = (value: number): number => Math.min(1, Math.max(-1, value));
+    this.design.weightAt = { sideways: hold(sideways), up: hold(up) };
+    this.showWeight();
+    this.refreshReadout();
+  }
+
+  /** Draws where the weight is, and says plainly what it costs. */
+  private showWeight(): void {
+    const at = this.design.weightAt;
+    this.weightDot.style.left = `${((at.sideways + 1) / 2) * 100}%`;
+    this.weightDot.style.top = `${((1 - at.up) / 2) * 100}%`;
+    const off = Math.sqrt(at.sideways * at.sideways + at.up * at.up);
+    this.weightNote.textContent =
+      off < 0.08 ? TEXT.weightEven : off < 0.5 ? TEXT.weightSome : TEXT.weightLots;
+    this.weightPanel.classList.toggle('is-off-centre', off >= 0.08);
   }
 
   /** Pulls the three numbers back out of a colour. */
@@ -516,6 +594,7 @@ export class BallEditor {
       photoStrength: this.design.photoStrength,
       shine: this.design.shine,
       mixed: [...this.design.mixed],
+      weightAt: { ...this.design.weightAt },
     };
   }
 
@@ -561,7 +640,7 @@ export class BallEditor {
   }
 
   private refreshStats(): void {
-    const stats = measureShape(this.design.voxels);
+    const stats = measureShape(this.design.voxels, this.design.weightAt);
     clear(this.statsRow);
     // How quickly the ball gets going is not a made-up number: it is what
     // the rules actually work out from where the cubes sit. Weight gathered
