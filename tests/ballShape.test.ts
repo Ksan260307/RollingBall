@@ -1,18 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   CUBE_METRES,
+  MIXED_BASE,
+  MIXED_LIMIT,
   PALETTE,
   SHAPE_CELLS,
   SHAPE_CENTRE,
   SHAPE_SIZE,
   cellAt,
   cellIndex,
+  colourAt,
+  isColour,
   cubeShape,
   defaultShape,
   insideShape,
   largestConnectedPart,
   measureShape,
   pebbleShape,
+  randomShape,
   shapeFingerprint,
   shapeFromText,
   shapeToText,
@@ -220,5 +225,85 @@ describe('keeping the ball in one piece', () => {
     const tidied = largestConnectedPart(voxels);
     expect(tidied[cellIndex(1, 1, 1)]).toBe(0);
     expect(countCubes(tidied)).toBe(4);
+  });
+});
+
+describe('colours mixed by hand', () => {
+  it('keeps the ready-made colours where they were', () => {
+    // Balls already made hold numbers, not colours. Moving one would repaint
+    // somebody's ball behind their back.
+    expect(colourAt(1)).toBe(PALETTE[1]);
+    expect(colourAt(8)).toBe(PALETTE[8]);
+    expect(MIXED_BASE).toBeGreaterThan(PALETTE.length);
+  });
+
+  it('reads a mixed colour out of the ball it belongs to', () => {
+    const mixed = ['#123456', '#abcdef'];
+    expect(colourAt(MIXED_BASE, mixed)).toBe('#123456');
+    expect(colourAt(MIXED_BASE + 1, mixed)).toBe('#abcdef');
+  });
+
+  it('falls back to a plain colour when the mix is missing', () => {
+    // A ball saved with mixed colours and loaded without them still draws.
+    expect(colourAt(MIXED_BASE + 5, [])).toBe(PALETTE[8]);
+    expect(colourAt(250)).toBe(PALETTE[8]);
+  });
+
+  it('every slot a ball can hold fits in a cube', () => {
+    expect(MIXED_BASE + MIXED_LIMIT).toBeLessThanOrEqual(255);
+  });
+
+  it('only lets real colours through', () => {
+    expect(isColour('#ff00aa')).toBe(true);
+    expect(isColour('#FF00AA')).toBe(true);
+    expect(isColour('red')).toBe(false);
+    expect(isColour('#fff')).toBe(false);
+    expect(isColour(12)).toBe(false);
+    expect(isColour(null)).toBe(false);
+  });
+});
+
+describe('the random ball, now there are a lot of styles', () => {
+  it('makes plainly different shapes across a run of seeds', () => {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 120; seed++) {
+      const shape = randomShape(seed);
+      let filled = 0;
+      for (const cube of shape) if (cube !== 0) filled++;
+      const stats = measureShape(shape);
+      seen.add(`${Math.round(filled / 40)}:${Math.round(toNumber(stats.smoothness) * 10)}`);
+    }
+    // Not a rewording of the style count: this counts how many genuinely
+    // different balls come out the other end.
+    expect(seen.size).toBeGreaterThan(20);
+  });
+
+  it('never makes one that cannot be used at all', () => {
+    for (let seed = 1; seed <= 120; seed++) {
+      const shape = randomShape(seed);
+      let filled = 0;
+      for (const cube of shape) if (cube !== 0) filled++;
+      expect(filled).toBeGreaterThan(50);
+      const stats = measureShape(shape);
+      expect(toNumber(stats.radius)).toBeGreaterThan(0.05);
+      expect(toNumber(stats.spinResistance)).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives the same ball for the same seed, every time', () => {
+    for (const seed of [3, 77, 512, 20260819]) {
+      expect(Array.from(randomShape(seed))).toEqual(Array.from(randomShape(seed)));
+    }
+  });
+
+  it('paints with more than a couple of patterns', () => {
+    const patterns = new Set<string>();
+    for (let seed = 1; seed <= 120; seed++) {
+      const shape = randomShape(seed);
+      const colours = new Set<number>();
+      for (const cube of shape) if (cube !== 0) colours.add(cube);
+      patterns.add([...colours].sort((a, b) => a - b).join(','));
+    }
+    expect(patterns.size).toBeGreaterThan(30);
   });
 });

@@ -136,8 +136,15 @@ const PROGRESS_STEP = Math.round(1.0 * ONE);
 /** How much bounce is left after landing. */
 const LANDING_BOUNCE = Math.round(0.26 * ONE);
 
-/** How much bounce is left after hitting a wall. */
-const WALL_BOUNCE = Math.round(0.45 * ONE);
+/**
+ * How much bounce is left after hitting a railing.
+ *
+ * Higher than the bounce off the floor on purpose: a railing is there to be
+ * hit, and one that swallowed the knock would feel like running into wet
+ * sand. This throws the ball back into the course rather than letting it
+ * grind along the barrier.
+ */
+const WALL_BOUNCE = Math.round(0.75 * ONE);
 
 /** How much a wall scrubs at the ball as it slides along it. */
 const WALL_GRIP = Math.round(0.4 * ONE);

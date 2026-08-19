@@ -114,7 +114,7 @@ body {
 
 .title-card {
   text-align: center;
-  width: min(620px, 100%);
+  width: min(660px, 100%);
   padding: clamp(18px, 4vw, 36px) clamp(20px, 5vw, 44px);
   background: var(--card);
   border: 1px solid var(--edge);
@@ -128,28 +128,32 @@ body {
  * its own it splits in the middle of a word.
  */
 .title {
-  margin: 0 0 10px;
+  margin: 0 0 14px;
   display: grid;
-  gap: 2px;
+  gap: 0;
   line-height: 1.1;
   text-shadow: 0 4px 22px rgba(255, 159, 28, 0.35);
 }
 
-.title-lead {
-  font-size: clamp(15px, 3.6vw, 21px);
-  letter-spacing: 0.34em;
+/*
+ * Both lines are the one title, so they are set the same way and differ only
+ * in size. The smaller line is held back a little with opacity rather than
+ * with a different colour and weight, which read as two unrelated bits of
+ * text sitting on top of each other.
+ */
+.title-lead,
+.title-main {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.06em;
   /* The tracking adds space on the right; this keeps the line centred. */
-  text-indent: 0.34em;
-  color: var(--ink-soft);
-  font-weight: 600;
+  text-indent: 0.06em;
+  white-space: nowrap;
 }
 
+.title-lead,
 .title-main {
   font-size: clamp(30px, 8.2vw, 52px);
-  letter-spacing: 0.06em;
-  text-indent: 0.06em;
-  color: var(--accent);
-  white-space: nowrap;
 }
 
 .tagline {
@@ -1032,4 +1036,203 @@ body {
     flex: 1 0 100%;
     justify-content: center;
   }
+}
+
+/* A colour you mixed sits in the same row, marked so it reads as yours. */
+.swatch.is-mixed {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.swatch-mix {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--accent);
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+  border-style: dashed;
+  border-color: rgba(255, 209, 102, 0.7);
+}
+
+/* The little window for mixing one. */
+.mixer {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mixer.is-closed {
+  display: none;
+}
+
+.mixer-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mixer-patch {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  flex: 0 0 auto;
+}
+
+.mixer-hex {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.mixer-note {
+  font-size: 0.8rem;
+  opacity: 0.65;
+  margin-left: auto;
+  text-align: right;
+}
+
+.mixer-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mixer-bar > span {
+  width: 1.2em;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.mixer-bar input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The slider track shows what the number does, so it can be aimed at. */
+.mixer-R input {
+  accent-color: #ff5b6e;
+}
+
+.mixer-G input {
+  accent-color: #66d97a;
+}
+
+.mixer-B input {
+  accent-color: #4fc3f7;
+}
+
+.mixer-buttons {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Says plainly that this is a replay and not a run in progress. */
+.replay-flag {
+  position: absolute;
+  top: max(var(--pad), env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(12, 16, 28, 0.72);
+  backdrop-filter: blur(8px);
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.replay-flag.is-hidden {
+  display: none;
+}
+
+/* A dot that pulses, the way a recording light does. */
+.replay-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #ff5b6e;
+  animation: replay-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes replay-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .replay-dot {
+    animation: none;
+  }
+}
+
+/*
+ * The edges of the screen light up with speed.
+ *
+ * The middle is left completely alone: it never gets between the player and
+ * the ball, it only fills the corners of the eye.
+ */
+.speed-rush {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms linear;
+  background: radial-gradient(
+    ellipse 68% 62% at 50% 55%,
+    rgba(255, 255, 255, 0) 55%,
+    rgba(255, 236, 179, 0.16) 82%,
+    rgba(255, 190, 90, 0.34) 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speed-rush {
+    display: none;
+  }
+}
+
+/*
+ * How the run compares with the best one so far.
+ *
+ * Under the clock rather than beside it: it belongs to the time, and putting
+ * it there keeps the top of the screen to two things instead of three.
+ */
+.hud-gap {
+  position: absolute;
+  top: calc(max(var(--pad), env(safe-area-inset-top)) + 96px);
+  left: max(var(--pad), env(safe-area-inset-left));
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: clamp(15px, 4vw, 20px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  background: rgba(12, 16, 28, 0.6);
+  backdrop-filter: blur(6px);
+}
+
+.hud-gap.is-hidden {
+  display: none;
+}
+
+.hud-gap.is-ahead {
+  color: #67e8a0;
+}
+
+.hud-gap.is-behind {
+  color: #ff8f8f;
 }

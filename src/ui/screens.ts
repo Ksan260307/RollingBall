@@ -174,6 +174,10 @@ export class Screens {
         this.settings.invertPush = value;
         change();
       }),
+      toggle(TEXT.settingsGhost, this.settings.ghost, (value) => {
+        this.settings.ghost = value;
+        change();
+      }),
       button(TEXT.settingsClear, () => {
         this.actions.onClearRecords();
         const note = el('p', { class: 'note', text: TEXT.settingsCleared });

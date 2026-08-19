@@ -650,3 +650,54 @@ describe('the rules stay exactly repeatable', () => {
     expect(Number.isInteger(world.spinZ[0])).toBe(true);
   });
 });
+
+describe('hitting a railing', () => {
+  it('throws the ball back rather than swallowing the knock', () => {
+    // A railing you can lean on and grind along the whole way down is no
+    // barrier at all. What comes back out should be a good share of what
+    // went in, so a hit reads as a hit.
+    const world = new World({
+      course: buildCourse([{ length: 60, drop: 3, width: 6, walls: true }]),
+      seed: 4,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    const hardRight = packControls({ steer: ONE, push: 0, buttons: 0 });
+
+    let into = 0;
+    let back = 0;
+    let previous = 0;
+    for (let i = 0; i < STEPS_PER_SECOND * 12; i++) {
+      const before = toNumber(world.velocityX[0]);
+      world.advance([hardRight]);
+      const hit = world.moments.some((moment) => moment.kind === 'wall');
+      if (hit && into === 0) {
+        into = Math.abs(before);
+        back = Math.abs(toNumber(world.velocityX[0]));
+      }
+      previous = before;
+    }
+    expect(previous).not.toBeNaN();
+    expect(into).toBeGreaterThan(0.5);
+    // Lively: most of the speed comes back the other way.
+    expect(back).toBeGreaterThan(into * 0.4);
+  });
+
+  it('still lets the ball settle rather than pinging about for ever', () => {
+    // A bouncy railing must not turn a lean into a pinball table.
+    const world = new World({
+      course: buildCourse([{ length: 70, drop: 4, width: 5, walls: true }]),
+      seed: 4,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    let hits = 0;
+    for (let i = 0; i < STEPS_PER_SECOND * 14; i++) {
+      world.advance([packControls({ steer: Math.round(0.5 * ONE), push: 0, buttons: 0 })]);
+      for (const moment of world.moments) if (moment.kind === 'wall') hits++;
+    }
+    // It touches the railing, and it is still on the course at the end.
+    expect(hits).toBeGreaterThan(0);
+    expect(world.falls[0]).toBe(0);
+  });
+});

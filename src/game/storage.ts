@@ -8,8 +8,10 @@
  */
 
 import {
+  MIXED_LIMIT,
   SHAPE_CELLS,
   defaultShape,
+  isColour,
   shapeFromText,
   shapeTextCells,
   shapeToText,
@@ -23,6 +25,47 @@ const OLD_SHAPE_CELLS = OLD_SHAPE_SIZE * OLD_SHAPE_SIZE * OLD_SHAPE_SIZE;
 const RECORDS_KEY = 'rollingball.records.v1';
 const BALL_KEY = 'rollingball.ball.v1';
 const SETTINGS_KEY = 'rollingball.settings.v1';
+const GHOST_KEY = 'rollingball.best-runs.v1';
+
+/**
+ * A best run is kept so it can be raced against.
+ *
+ * What is stored is the list of things the player did, one entry per step,
+ * which is a few kilobytes rather than anything like a recording.
+ */
+export function saveGhost(stageId: string, controls: readonly number[]): void {
+  const all = loadGhostStore();
+  all[stageId] = Array.from(controls);
+  writeStore(GHOST_KEY, JSON.stringify(all));
+}
+
+/** The best run for a course, or null if there is not one worth using. */
+export function loadGhost(stageId: string): number[] | null {
+  const one = loadGhostStore()[stageId];
+  return Array.isArray(one) && one.length > 60 ? one : null;
+}
+
+/** Throws away every stored run, alongside the times. */
+export function clearGhosts(): void {
+  writeStore(GHOST_KEY, JSON.stringify({}));
+}
+
+function loadGhostStore(): Record<string, number[]> {
+  const raw = readStore(GHOST_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, number[]> = {};
+    for (const [id, value] of Object.entries(parsed)) {
+      // Anything that is not a list of whole numbers is dropped rather than
+      // fed to the rules, where it would make a nonsense of the ghost.
+      if (Array.isArray(value) && value.every(Number.isInteger)) out[id] = value as number[];
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 function readStore(key: string): string | null {
   try {
@@ -87,10 +130,12 @@ export interface BallDesign {
   photoStrength: number;
   /** How shiny the surface is, 0 to 1. */
   shine: number;
+  /** Colours mixed by hand for this ball, as `#rrggbb`. */
+  mixed: string[];
 }
 
 export function defaultBall(): BallDesign {
-  return { voxels: defaultShape(), photo: null, photoStrength: 0.85, shine: 0.35 };
+  return { voxels: defaultShape(), photo: null, photoStrength: 0.85, shine: 0.35, mixed: [] };
 }
 
 export function loadBall(): BallDesign {
@@ -102,6 +147,7 @@ export function loadBall(): BallDesign {
       photo?: string | null;
       photoStrength?: number;
       shine?: number;
+      mixed?: unknown;
     };
     const voxels = parsed.shape ? readShape(parsed.shape) : defaultShape();
     if (voxels.length !== SHAPE_CELLS) return defaultBall();
@@ -113,6 +159,10 @@ export function loadBall(): BallDesign {
       photo: typeof parsed.photo === 'string' ? parsed.photo : null,
       photoStrength: clampUnit(parsed.photoStrength, 0.85),
       shine: clampUnit(parsed.shine, 0.35),
+      // Anything that is not a colour is dropped rather than drawn.
+      mixed: Array.isArray(parsed.mixed)
+        ? parsed.mixed.filter(isColour).slice(0, MIXED_LIMIT)
+        : [],
     };
   } catch {
     return defaultBall();
@@ -127,6 +177,7 @@ export function saveBall(design: BallDesign): void {
       photo: design.photo,
       photoStrength: design.photoStrength,
       shine: design.shine,
+      mixed: design.mixed,
     }),
   );
 }
@@ -157,10 +208,12 @@ export interface Settings {
   sound: boolean;
   /** Swaps which way dragging up and down works. */
   invertPush: boolean;
+  /** Shows your best run alongside you as you go. */
+  ghost: boolean;
 }
 
 export function defaultSettings(): Settings {
-  return { zoom: 1, richGraphics: true, sound: true, invertPush: false };
+  return { zoom: 1, richGraphics: true, sound: true, invertPush: false, ghost: true };
 }
 
 export function loadSettings(): Settings {
@@ -177,6 +230,7 @@ export function loadSettings(): Settings {
       richGraphics: parsed.richGraphics ?? fallback.richGraphics,
       sound: parsed.sound ?? fallback.sound,
       invertPush: parsed.invertPush ?? fallback.invertPush,
+      ghost: parsed.ghost ?? fallback.ghost,
     };
   } catch {
     return defaultSettings();

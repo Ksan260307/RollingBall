@@ -71,7 +71,8 @@
           "width": 10,
           "walls": true
         }
-      ]
+      ],
+      "inGame": true
     },
     {
       "id": "valley",
@@ -150,7 +151,8 @@
           "width": 9,
           "walls": true
         }
-      ]
+      ],
+      "inGame": true
     },
     {
       "id": "skyway",
@@ -243,46 +245,8 @@
           "width": 8,
           "walls": true
         }
-      ]
-    },
-    {
-      "id": "course-4",
-      "name": "ぐねぐね",
-      "blurb": "",
-      "difficulty": 1,
-      "mood": {
-        "sky": "#8fd3ff",
-        "horizon": "#e8f7ff",
-        "ground": "#7fc98a",
-        "floor": "#f2f6e9",
-        "edge": "#ffd166",
-        "fog": 190
-      },
-      "breeze": 0,
-      "seed": 1003,
-      "targetSeconds": 20,
-      "pieces": [
-        {
-          "length": 100,
-          "drop": 33,
-          "width": 20,
-          "walls": true,
-          "turn": 75
-        },
-        {
-          "length": 20,
-          "turn": 20,
-          "drop": 7,
-          "width": 8,
-          "walls": true
-        },
-        {
-          "length": 20,
-          "drop": 6,
-          "width": 9,
-          "walls": true
-        }
-      ]
+      ],
+      "inGame": true
     }
   ]
 }

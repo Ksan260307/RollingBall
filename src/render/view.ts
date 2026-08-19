@@ -7,7 +7,11 @@
  */
 
 import {
+  AdditiveBlending,
   AmbientLight,
+  BufferAttribute,
+  BufferGeometry,
+  DoubleSide,
   BackSide,
   BoxGeometry,
   CanvasTexture,
@@ -55,8 +59,33 @@ const LOOK_AHEAD = 6.0;
 /** How many sparkle pieces can be in the air at once. */
 const SPARKLE_COUNT = 72;
 
+/** How long a knock rattles the camera for. */
+const SHAKE_SECONDS = 0.34;
+
+/** How far the camera moves at the height of the hardest knock, in metres. */
+const SHAKE_REACH = 0.34;
+
+/** How much wider the view opens as the ball gets going. */
+const FOV_STILL = 58;
+const FOV_FLYING = 68;
+
+/** How many points the trail behind the ball remembers. */
+const TRAIL_POINTS = 30;
+
+/** How far the ball moves before the trail takes another point, in metres. */
+const TRAIL_STEP = 0.16;
+
+/**
+ * The speeds, in metres a second, between which the trail comes up.
+ *
+ * A ball tops out around twelve, so these are set from what actually
+ * happens on a course rather than from a round number.
+ */
+const TRAIL_FROM_SPEED = 3.5;
+const TRAIL_FULL_SPEED = 11;
+
 /** How long the ball takes to burst through the finish and vanish. */
-const BREAKTHROUGH_SECONDS = 2.6;
+const BREAKTHROUGH_SECONDS = 1.7;
 
 /** The ways the camera can watch a replay. */
 export const CAMERA_STYLES = [
@@ -77,6 +106,7 @@ const scratchQuaternion = new Quaternion();
 const scratchScale = new Vector3(1, 1, 1);
 const scratchAxis = new Vector3();
 const scratchForward = new Vector3();
+const ghostSpinScratch = emptySpin();
 const scratchRight = new Vector3();
 const spinScratch = emptySpin();
 
@@ -137,6 +167,24 @@ export class GameView {
   /** How the camera watches the ball. Replays cycle through the lot. */
   cameraStyle: CameraStyle = 'chase';
 
+  /** How hard the camera is still being shaken, and how far along it is. */
+  private shakeLeft = 0;
+  private shakeStrength = 0;
+
+  /** The pale copy of your best run, racing alongside. */
+  private readonly ghostGroup = new Group();
+  private ghostMesh: Mesh | null = null;
+  private ghostMaterial: MeshStandardMaterial | null = null;
+  private readonly ghostSpin = new Quaternion();
+
+  /** The ribbon that follows the ball about. */
+  private trail: Mesh | null = null;
+  private trailPositions: Float32Array | null = null;
+  private trailColours: Float32Array | null = null;
+  /** Where the ball has been, newest last, as a flat list of three numbers. */
+  private readonly trailPath: number[] = [];
+  private readonly trailTint = new Color('#ffd166');
+
   /** Set while the ball is bursting through the finish and away. */
   private breakthrough = 0;
   private readonly breakAway = new Vector3();
@@ -186,8 +234,11 @@ export class GameView {
     this.scene.add(this.sunlight.target);
 
     this.scene.add(this.ballGroup);
+    this.ghostGroup.visible = false;
+    this.scene.add(this.ghostGroup);
     this.buildSceneryLayers();
     this.buildSparkles();
+    this.buildTrail();
     this.resize();
 
     // Follow the canvas itself, so the picture is right however the page was
@@ -252,6 +303,8 @@ export class GameView {
   /** Swaps in a new course and its colours. */
   setStage(stage: Stage, course: Course): void {
     this.edgeColour = stage.mood.edge;
+    this.trailTint.set(stage.mood.edge);
+    this.clearTrail();
     if (this.courseMesh) {
       this.scene.remove(this.courseMesh);
       disposeCourseMesh(this.courseMesh);
@@ -329,7 +382,7 @@ export class GameView {
       this.ballMaterial?.map?.dispose();
       this.ballMaterial?.dispose();
     }
-    const built = buildBallMesh(design.voxels, design.shine, 1);
+    const built = buildBallMesh(design.voxels, design.shine, 1, design.mixed);
     this.ballMesh = built.mesh;
     this.ballMaterial = built.material;
     this.ballGroup.add(built.mesh);
@@ -349,8 +402,61 @@ export class GameView {
     }
   }
 
+  /**
+   * Puts a see-through copy of the ball on the course, for the best run to
+   * be shown with.
+   *
+   * It is drawn without writing to the depth buffer so it never hides the
+   * ball you are actually steering: yours is always the solid one in front.
+   */
+  async setGhostBall(design: BallDesign): Promise<void> {
+    if (this.ghostMesh) {
+      this.ghostGroup.remove(this.ghostMesh);
+      this.ghostMesh.geometry.dispose();
+      this.ghostMaterial?.dispose();
+    }
+    const built = buildBallMesh(design.voxels, 0, 1, design.mixed);
+    built.material.transparent = true;
+    built.material.opacity = 0.32;
+    built.material.depthWrite = false;
+    built.material.emissive = new Color('#9fd8ff');
+    built.material.emissiveIntensity = 0.35;
+    built.mesh.castShadow = false;
+    built.mesh.renderOrder = -1;
+    this.ghostMesh = built.mesh;
+    this.ghostMaterial = built.material;
+    this.ghostGroup.add(built.mesh);
+    this.ghostSpin.identity();
+    await Promise.resolve();
+  }
+
+  /** Hides the pale copy, for a course with no best run behind it. */
+  hideGhost(): void {
+    this.ghostGroup.visible = false;
+  }
+
+  /** Moves the pale copy to where the old run had got to by now. */
+  showGhost(world: World, delta: number): void {
+    if (!this.ghostMesh) return;
+    this.ghostGroup.visible = true;
+    this.ghostGroup.position.set(
+      toMetres(world.x[0]),
+      toMetres(world.y[0]),
+      toMetres(world.z[0]),
+    );
+    const spin = drawnSpin(world, ghostSpinScratch);
+    const rate = spinRate(spin);
+    if (rate > 1e-5) {
+      scratchAxis.set(spin.x / rate, spin.y / rate, spin.z / rate);
+      scratchQuaternion.setFromAxisAngle(scratchAxis, rate * delta);
+      this.ghostSpin.premultiply(scratchQuaternion);
+      this.ghostGroup.quaternion.copy(this.ghostSpin);
+    }
+  }
+
   /** Fills in the scenery from the world, once per run. */
   prepareScenery(world: World): void {
+    this.clearTrail();
     for (const layer of this.sceneryLayers) {
       layer.slots.length = 0;
       layer.mesh.count = 0;
@@ -418,7 +524,7 @@ export class GameView {
         toMetres(world.course.forwardZ[point]),
       )
       .normalize()
-      .multiplyScalar(speed * 1.35);
+      .multiplyScalar(speed * 1.6);
     // A shove upward as well, so it arcs away rather than boring into the hill.
     this.breakAway.y += speed * 0.35;
     this.breakthrough = BREAKTHROUGH_SECONDS;
@@ -448,7 +554,177 @@ export class GameView {
    */
   setBallVisible(on: boolean): void {
     this.ballGroup.visible = on;
-    if (on) this.ballGroup.scale.setScalar(1);
+    if (on) {
+      this.ballGroup.scale.setScalar(1);
+      this.setBallFade(1);
+    }
+  }
+
+  /** How solid the ball is drawn, for fading it out of the picture. */
+  private setBallFade(amount: number): void {
+    if (!this.ballMaterial) return;
+    const solid = amount >= 1;
+    this.ballMaterial.transparent = !solid;
+    this.ballMaterial.opacity = Math.max(0, Math.min(1, amount));
+  }
+
+  /**
+   * Builds the ribbon that follows the ball.
+   *
+   * It is one strip of triangles, two corners per remembered point, rewritten
+   * each frame. Nothing is created or thrown away while playing, which is
+   * what keeps it free on a phone.
+   */
+  private buildTrail(): void {
+    const geometry = new BufferGeometry();
+    this.trailPositions = new Float32Array(TRAIL_POINTS * 2 * 3);
+    this.trailColours = new Float32Array(TRAIL_POINTS * 2 * 3);
+    geometry.setAttribute('position', new BufferAttribute(this.trailPositions, 3));
+    geometry.setAttribute('color', new BufferAttribute(this.trailColours, 3));
+    const indices: number[] = [];
+    for (let i = 0; i < TRAIL_POINTS - 1; i++) {
+      const a = i * 2;
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    geometry.setIndex(indices);
+    const material = new MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      blending: AdditiveBlending,
+      side: DoubleSide,
+    });
+    this.trail = new Mesh(geometry, material);
+    this.trail.frustumCulled = false;
+    this.trail.visible = false;
+    this.scene.add(this.trail);
+  }
+
+  /** Forgets where the ball has been, for the start of a run. */
+  private clearTrail(): void {
+    this.trailPath.length = 0;
+    if (this.trail) this.trail.visible = false;
+  }
+
+  /**
+   * Draws the streak the ball leaves behind it.
+   *
+   * It only shows up at speed, and fades away along its length, so it reads
+   * as "going fast" rather than as a permanent tail stuck to the ball.
+   */
+  private updateTrail(world: World, bx: number, by: number, bz: number): void {
+    if (!this.trail || !this.trailPositions || !this.trailColours) return;
+    if (!this.richGraphics || this.breakthrough > 0) {
+      this.trail.visible = false;
+      return;
+    }
+
+    const speed = world.speedFor(0) / ONE;
+    const strength = Math.min(
+      1,
+      Math.max(0, (speed - TRAIL_FROM_SPEED) / (TRAIL_FULL_SPEED - TRAIL_FROM_SPEED)),
+    );
+    if (strength <= 0 || world.grounded[0] !== 1) {
+      // Let it run out rather than snapping off the moment it slows.
+      if (this.trailPath.length > 6) this.trailPath.splice(0, 3);
+      if (this.trailPath.length < 12) {
+        this.trail.visible = false;
+        return;
+      }
+    }
+
+    const count = this.trailPath.length / 3;
+    const lastX = count > 0 ? this.trailPath[this.trailPath.length - 3] : 0;
+    const lastY = count > 0 ? this.trailPath[this.trailPath.length - 2] : 0;
+    const lastZ = count > 0 ? this.trailPath[this.trailPath.length - 1] : 0;
+    const moved =
+      count === 0
+        ? Infinity
+        : Math.hypot(bx - lastX, by - lastY, bz - lastZ);
+    if (moved >= TRAIL_STEP) {
+      this.trailPath.push(bx, by, bz);
+      while (this.trailPath.length > TRAIL_POINTS * 3) this.trailPath.splice(0, 3);
+    }
+
+    const points = this.trailPath.length / 3;
+    if (points < 3) {
+      this.trail.visible = false;
+      return;
+    }
+
+    const width = 0.08 + strength * 0.16;
+    for (let i = 0; i < TRAIL_POINTS; i++) {
+      // Points we do not have yet all sit on the oldest one, so the strip
+      // stays a strip without needing its shape changed.
+      const at = Math.min(points - 1, i);
+      const px = this.trailPath[at * 3];
+      const py = this.trailPath[at * 3 + 1];
+      const pz = this.trailPath[at * 3 + 2];
+
+      const next = Math.min(points - 1, at + 1);
+      const dx = this.trailPath[next * 3] - px;
+      const dz = this.trailPath[next * 3 + 2] - pz;
+      const length = Math.hypot(dx, dz) || 1;
+      // Across the direction of travel, and flat, so it lies on the floor.
+      const sx = (-dz / length) * width;
+      const sz = (dx / length) * width;
+
+      const along = points > 1 ? at / (points - 1) : 0;
+      const fade = along * along * strength;
+      const base = i * 6;
+      this.trailPositions[base] = px + sx;
+      this.trailPositions[base + 1] = py - 0.28;
+      this.trailPositions[base + 2] = pz + sz;
+      this.trailPositions[base + 3] = px - sx;
+      this.trailPositions[base + 4] = py - 0.28;
+      this.trailPositions[base + 5] = pz - sz;
+      for (let corner = 0; corner < 2; corner++) {
+        const spot = base + corner * 3;
+        this.trailColours[spot] = this.trailTint.r * fade;
+        this.trailColours[spot + 1] = this.trailTint.g * fade;
+        this.trailColours[spot + 2] = this.trailTint.b * fade;
+      }
+    }
+
+    const geometry = this.trail.geometry;
+    geometry.getAttribute('position').needsUpdate = true;
+    geometry.getAttribute('color').needsUpdate = true;
+    this.trail.visible = true;
+  }
+
+  /**
+   * Knocks the camera about for a moment.
+   *
+   * Used for the knocks the player is meant to feel: hitting a railing,
+   * landing hard. It moves nothing but the camera, so a jolt can never cost
+   * anybody a run.
+   *
+   * @param strength how hard, where 1 is a good solid hit
+   */
+  shake(strength: number): void {
+    const wanted = Math.min(1, Math.max(0, strength));
+    // A new knock during an old one takes over only if it is harder.
+    if (wanted <= this.shakeStrength && this.shakeLeft > 0) return;
+    this.shakeStrength = wanted;
+    this.shakeLeft = SHAKE_SECONDS;
+  }
+
+  /**
+   * Shifts the camera by whatever is left of the last knock.
+   *
+   * Two waves at different rates, so it reads as a rattle rather than a
+   * wobble, dying away over the length of the shake.
+   */
+  private applyShake(delta: number, seconds: number): void {
+    if (this.shakeLeft <= 0) return;
+    this.shakeLeft = Math.max(0, this.shakeLeft - delta);
+    const left = this.shakeLeft / SHAKE_SECONDS;
+    const amount = this.shakeStrength * left * left * SHAKE_REACH;
+    this.camera.position.x += Math.sin(seconds * 61) * amount;
+    this.camera.position.y += Math.sin(seconds * 47) * amount * 0.8;
+    this.camera.position.z += Math.sin(seconds * 53) * amount;
+    if (this.shakeLeft <= 0) this.shakeStrength = 0;
   }
 
   /** Starts a burst of sparkles at a point. */
@@ -522,8 +798,10 @@ export class GameView {
       const gone = 1 - this.breakthrough / BREAKTHROUGH_SECONDS;
       this.breakAway.y -= 9.8 * delta * 0.25;
       this.ballGroup.position.addScaledVector(this.breakAway, delta);
-      // Holds its size while it is still worth watching, then goes.
-      this.ballGroup.scale.setScalar(Math.max(0.001, 1 - gone * gone * gone));
+      // Shrinks, then fades out altogether, so it clearly goes rather than
+      // hanging about in the distance spinning.
+      this.ballGroup.scale.setScalar(Math.max(0.001, 1 - gone * gone));
+      this.setBallFade(Math.max(0, 1 - Math.max(0, gone - 0.45) / 0.55));
       this.ballGroup.visible = this.breakthrough > 0;
       this.spinBall(world, delta * 2.4);
       // The camera plants itself where it was and turns to watch, so the
@@ -543,8 +821,9 @@ export class GameView {
 
     this.ballGroup.position.set(bx, by, bz);
     this.spinBall(world, delta);
+    this.updateTrail(world, bx, by, bz);
 
-    this.followBall(world, bx, by, bz, delta);
+    this.followBall(world, bx, by, bz, delta, seconds);
 
     this.updateScenery(world, seconds);
     this.updateSparkles(delta);
@@ -576,7 +855,14 @@ export class GameView {
   }
 
   /** Keeps the camera behind and a little above the ball. */
-  private followBall(world: World, bx: number, by: number, bz: number, delta: number): void {
+  private followBall(
+    world: World,
+    bx: number,
+    by: number,
+    bz: number,
+    delta: number,
+    seconds: number,
+  ): void {
     const course = world.course;
     const point = Math.min(course.count - 1, Math.max(0, courseIndexOf(world)));
     const forward = scratchForward.set(
@@ -646,6 +932,20 @@ export class GameView {
 
     this.camera.position.copy(this.cameraPosition);
     this.camera.lookAt(this.cameraTarget);
+
+    // The view opens out as the ball gets going. It is a small change and
+    // nobody notices it happening, which is the point: what they notice is
+    // that going fast feels like going fast.
+    const speed = world.speedFor(0) / ONE;
+    const rush = Math.min(1, Math.max(0, (speed - 5) / 8));
+    const wanted = FOV_STILL + (FOV_FLYING - FOV_STILL) * rush;
+    const eased = this.camera.fov + (wanted - this.camera.fov) * (1 - Math.exp(-3 * delta));
+    if (Math.abs(eased - this.camera.fov) > 0.01) {
+      this.camera.fov = eased;
+      this.camera.updateProjectionMatrix();
+    }
+
+    this.applyShake(delta, seconds);
   }
 
   /** Releases everything held by the view. */

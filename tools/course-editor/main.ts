@@ -265,6 +265,20 @@ function numberField(
   return el('label', {}, el('span', { text: label }), input);
 }
 
+/** A plain yes/no switch. */
+function tickField(
+  label: string,
+  value: boolean,
+  onChange: (value: boolean) => void,
+): HTMLElement {
+  const input = el('input', {
+    attrs: { type: 'checkbox' },
+    on: { change: (event) => onChange((event.target as HTMLInputElement).checked) },
+  }) as HTMLInputElement;
+  input.checked = value;
+  return el('label', { class: 'tick' }, input, el('span', { text: label }));
+}
+
 function textField(
   label: string,
   value: string,
@@ -293,7 +307,7 @@ function renderTabs(): HTMLElement {
   const tabs = el('div', { class: 'tabs' });
   state.courses.forEach((course, index) => {
     const tab = button(
-      `${index + 1}. ${course.name || course.id}`,
+      `${index + 1}. ${course.name || course.id}${course.inGame === false ? '（本編に出ません）' : ''}`,
       () => {
         state.current = index;
         state.chosenPiece = -1;
@@ -325,6 +339,11 @@ function renderCourseFields(): HTMLElement {
     ),
     textField('せつめい', course.blurb, (value) => {
       course.blurb = value;
+    }),
+    // Parking a course beats deleting it: the work stays, the game stays tidy.
+    tickField('本編に出す（外すと、ファイルには残るがゲームには出ません）', course.inGame !== false, (value) => {
+      course.inGame = value;
+      renderAll();
     }),
     el(
       'div',
@@ -576,6 +595,7 @@ function blankCourse(index: number): StoredCourse {
     blurb: '',
     difficulty: 1,
     mood: { ...COURSE_DEFAULTS.mood },
+    inGame: true,
     breeze: 0,
     seed: 1000 + index,
     targetSeconds: 20,

@@ -13,13 +13,18 @@ import { measureShape } from './core/ballShape';
 import { unpackControls } from './core/input';
 import { Session, type SessionOptions } from './game/session';
 import { Playback } from './game/playback';
+import { Ghost } from './game/ghost';
 import { demoControls } from './game/demoDriver';
 import { STAGES, Stage, courseFor } from './game/stages';
+import type { Course } from './core/course';
 import {
   BallDesign,
   Settings,
+  clearGhosts,
   clearRecords,
   loadBall,
+  loadGhost,
+  saveGhost,
   loadRecords,
   loadSettings,
   saveBall,
@@ -73,6 +78,8 @@ function main(): void {
   } | null = null;
   /** Seconds to hold on the end of a replay before it comes round again. */
   let replayHold = 0;
+  /** The best run so far on this course, racing alongside. */
+  let ghost: Ghost | null = null;
 
   const controls = new ControlReader(canvas);
   controls.invertPush = settings.invertPush;
@@ -121,6 +128,13 @@ function main(): void {
         if (session) {
           session.restart();
           hud.reset();
+          // The ball was put away when it went through the finish. Going
+          // again brings it back, or there would be nothing to steer.
+          view.clearBreakthrough();
+          // Going again picks up whatever the best run is now, which may be
+          // the one just finished.
+          hud.setBest(records[currentStage.id]);
+          setUpGhost(currentStage, session.world.course);
           beginPlaying();
         }
       },
@@ -147,6 +161,10 @@ function main(): void {
       },
       onClearRecords: () => {
         clearRecords();
+        // The times and the runs behind them go together.
+        clearGhosts();
+        ghost = null;
+        view.hideGhost();
         records = loadRecords();
         screens.setStages(records);
       },
@@ -172,6 +190,13 @@ function main(): void {
     const speed = playback.nextSpeed();
     speedButton.textContent = `×${speed}`;
   });
+  // A flag across the top, so nobody mistakes a replay for their own run.
+  const replayFlag = el(
+    'div',
+    { class: 'replay-flag is-hidden' },
+    el('span', { class: 'replay-dot' }),
+    el('span', { text: TEXT.replayNow }),
+  );
   const replayBar = el(
     'div',
     { class: 'replay-bar is-hidden' },
@@ -191,7 +216,16 @@ function main(): void {
     button(TEXT.close, () => endReplay(), 'ghost'),
   );
 
-  const ui = el('div', { class: 'ui' }, screens.root, hud.root, tools, replayBar, editor.root);
+  const ui = el(
+    'div',
+    { class: 'ui' },
+    screens.root,
+    hud.root,
+    tools,
+    replayFlag,
+    replayBar,
+    editor.root,
+  );
   app.append(ui);
 
   view.zoom = settings.zoom;
@@ -225,6 +259,8 @@ function main(): void {
     sounds.click();
     screens.show(name);
     const playing = name === 'none';
+    // Leaving the course for any menu stops the ball being heard.
+    if (!playing) sounds.quieten();
     hud.setVisible(playing);
     tools.classList.toggle('is-hidden', !playing);
     controls.enabled = playing;
@@ -254,6 +290,7 @@ function main(): void {
     currentStage = stage;
     playback = null;
     replayBar.classList.add('is-hidden');
+    replayFlag.classList.add('is-hidden');
     view.clearBreakthrough();
     view.cameraStyle = 'chase';
     const course = courseFor(stage);
@@ -268,6 +305,7 @@ function main(): void {
     view.prepareScenery(session.world);
     hud.reset();
     hud.setBest(records[stage.id]);
+    setUpGhost(stage, course);
     beginPlaying();
   }
 
@@ -281,6 +319,7 @@ function main(): void {
     if (!lastRun || lastRun.controls.length === 0) return;
     sounds.quieten();
     view.clearBreakthrough();
+    view.hideGhost();
     view.setStage(currentStage, lastRun.options.course);
     playback = new Playback(lastRun.options, lastRun.controls);
     replayHold = 0;
@@ -292,6 +331,7 @@ function main(): void {
     tools.classList.add('is-hidden');
     controls.enabled = false;
     replayBar.classList.remove('is-hidden');
+    replayFlag.classList.remove('is-hidden');
   }
 
   /** Back to the results, with the replay put away. */
@@ -303,9 +343,35 @@ function main(): void {
     if (lastRun?.finished) view.setBallVisible(false);
     view.cameraStyle = 'chase';
     replayBar.classList.add('is-hidden');
+    replayFlag.classList.add('is-hidden');
     sounds.quieten();
     mode = 'result';
     show('result');
+  }
+
+  /**
+   * Brings out the best run on this course to race against.
+   *
+   * Nothing here can touch the run in progress: the ghost has a world of
+   * its own, fed only by what was done last time.
+   */
+  function setUpGhost(stage: Stage, course: Course): void {
+    ghost = null;
+    view.hideGhost();
+    hud.setGap(null);
+    if (!settings.ghost) return;
+    const stored = loadGhost(stage.id);
+    if (!stored) return;
+    try {
+      ghost = new Ghost(
+        { stage, course, ball: measureShape(design.voxels), countdownSeconds: 3 },
+        stored,
+      );
+      void view.setGhostBall(design);
+    } catch {
+      // A stored run that no longer fits the course is simply not shown.
+      ghost = null;
+    }
   }
 
   function beginPlaying(): void {
@@ -326,8 +392,12 @@ function main(): void {
   /** Rolls a ball down the first course behind the menus. */
   function startDemo(): void {
     sounds.quieten();
+    ghost = null;
+    view.hideGhost();
+    hud.setGap(null);
     playback = null;
     replayBar.classList.add('is-hidden');
+    replayFlag.classList.add('is-hidden');
     view.clearBreakthrough();
     view.cameraStyle = 'chase';
     const stage = STAGES[0];
@@ -383,9 +453,19 @@ function main(): void {
 
     celebrating = true;
     const isBest = won && saveRecord(currentStage.id, summary.seconds);
-    if (isBest) records = loadRecords();
+    if (isBest) {
+      records = loadRecords();
+      // The best run is kept as what the player did, ready to be raced.
+      saveGhost(currentStage.id, session.replay());
+    }
+    view.hideGhost();
+    hud.setGap(null);
     window.setTimeout(() => {
       celebrating = false;
+      // Whatever the effect did or did not manage, a ball that crossed the
+      // line is gone by the time the result is up. Nothing should still be
+      // rolling about behind the panel.
+      if (won) view.setBallVisible(false);
       screens.setResult(summary, currentStage, records[currentStage.id], isBest);
       mode = 'result';
       show('result');
@@ -460,21 +540,44 @@ function main(): void {
       const active = session ?? demo;
       if (active) {
         if (active === session && mode === 'playing') {
+          const before = active.world.step;
           active.update(delta, controls.read());
+          // The ghost takes exactly the steps the live run just took, so the
+          // two stay level however the frame rate wanders.
+          if (ghost) {
+            ghost.advance(active.world.step - before);
+            view.showGhost(ghost.world, delta);
+            hud.setGap(ghost.gapAt(active.world.travelled[0] / ONE, active.seconds));
+          }
           hud.update(active);
+          hud.setRush(active.world.speedFor(0) / ONE);
           sounds.playMoments(active.world.moments);
-          sounds.followBall(active.world);
+          // The rolling sound belongs to a ball that is still rolling. The
+          // run can end several frames before the result panel arrives, and
+          // without this the noise carries on into the results and stays.
+          if (active.running) sounds.followBall(active.world);
+          else sounds.quieten();
           for (const moment of active.world.moments) {
             const mx = moment.x / ONE;
             const my = moment.y / ONE;
             const mz = moment.z / ONE;
+            // How hard it was, from nothing to a proper thump.
+            const force = Math.min(1, moment.strength / ONE / 3);
             if (moment.kind === 'skid') {
               // A puff of dust where the ball is sliding rather than rolling.
               view.burst(mx, my - 0.3, mz, '#d5dbe8', 2);
             } else if (moment.kind === 'land') {
-              view.burst(mx, my - 0.2, mz, '#ffffff', 3);
+              view.burst(mx, my - 0.2, mz, '#ffffff', 3 + Math.round(force * 5));
+              if (force > 0.25) view.shake(force * 0.7);
+            } else if (moment.kind === 'wall') {
+              // Sparks off the railing, in the colour of the railing, and a
+              // knock to the camera so the hit is felt as well as seen.
+              view.burst(mx, my, mz, currentStage.mood.edge, 3 + Math.round(force * 6));
+              view.burst(mx, my, mz, '#ffffff', 2);
+              view.shake(0.35 + force * 0.65);
             } else if (moment.kind === 'fall') {
               view.burst(mx, my, mz, '#ff7b7b', 6);
+              view.shake(0.5);
             }
           }
           if (!active.running) finishRun();

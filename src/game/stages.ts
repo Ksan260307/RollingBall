@@ -42,6 +42,8 @@ export interface Stage {
 
 /** What a course looks like in the file, before anything is filled in. */
 export interface StoredCourse {
+  /** Whether the course appears in the game. Missing counts as yes. */
+  inGame?: boolean;
   id: string;
   name: string;
   blurb: string;
@@ -158,9 +160,21 @@ export function stageFromStored(stored: StoredCourse, index: number): Stage {
 }
 
 /** Every course in the file, ready to play. */
-export const STAGES: Stage[] = ((courseData as { courses?: StoredCourse[] }).courses ?? []).map(
-  stageFromStored,
-);
+/**
+ * The courses the game offers.
+ *
+ * A course made in the editor can be parked rather than deleted: setting
+ * `inGame` to false in the course file leaves it there to work on without
+ * it turning up in the game. Anything that does not say either way counts
+ * as in, so a hand-written file needs no extra ceremony.
+ */
+export const STAGES: Stage[] = ((courseData as { courses?: StoredCourse[] }).courses ?? [])
+  .filter((course) => course?.inGame !== false)
+  .map(stageFromStored);
+
+/** Every course in the file, in it or not, for the editor to list. */
+export const ALL_COURSES: StoredCourse[] =
+  (courseData as { courses?: StoredCourse[] }).courses ?? [];
 
 /** Finds a course by its identifier. */
 export function stageById(id: string): Stage {

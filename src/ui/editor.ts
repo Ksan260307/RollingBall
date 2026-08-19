@@ -32,7 +32,10 @@ import {
 } from 'three';
 import {
   CUBE_METRES,
+  MIXED_BASE,
+  MIXED_LIMIT,
   PALETTE,
+  colourAt,
   SHAPE_CENTRE,
   cellIndex,
   cubeShape,
@@ -106,6 +109,11 @@ export class BallEditor {
   private readonly readout: HTMLElement;
   private undoButton: HTMLButtonElement | null = null;
   private readonly paletteRow: HTMLElement;
+  private readonly mixWindow: HTMLElement;
+  private mixing = false;
+  private mixRed = 255;
+  private mixGreen = 120;
+  private mixBlue = 60;
   private readonly toolRow: HTMLElement;
   private readonly noticeRow: HTMLElement;
   private readonly fileInput: HTMLInputElement;
@@ -124,6 +132,7 @@ export class BallEditor {
     this.statsRow = el('div', { class: 'editor-stats' });
     this.readout = el('div', { class: 'editor-readout' });
     this.paletteRow = el('div', { class: 'palette' });
+    this.mixWindow = el('div', { class: 'mixer is-closed' });
     this.toolRow = el('div', { class: 'tool-row' });
     this.noticeRow = el('div', { class: 'editor-notice' });
     this.fileInput = el('input', {
@@ -134,6 +143,7 @@ export class BallEditor {
 
     this.buildTools();
     this.buildPalette();
+    this.buildMixer();
 
     this.root = el(
       'section',
@@ -163,6 +173,7 @@ export class BallEditor {
             this.toolRow,
             this.readout,
             this.paletteRow,
+            this.mixWindow,
             el(
               'div',
               { class: 'tool-row' },
@@ -256,6 +267,157 @@ export class BallEditor {
       });
       this.paletteRow.append(swatch);
     }
+
+    // Then whatever has been mixed by hand, and the button to mix more.
+    this.design.mixed.forEach((hex, slot) => {
+      const index = MIXED_BASE + slot;
+      const chosen = this.colour === index;
+      this.paletteRow.append(
+        el('button', {
+          class: `swatch is-mixed${chosen ? ' is-active' : ''}`,
+          attrs: {
+            type: 'button',
+            style: `background:${hex}`,
+            'aria-label': `${TEXT.mixedColour} ${slot + 1}`,
+            'aria-pressed': chosen ? 'true' : 'false',
+            title: hex,
+          },
+          on: {
+            click: () => {
+              this.colour = index;
+              this.tool = 'paint';
+              // Tapping one you already have opens it up to be adjusted.
+              if (chosen) {
+                this.readMix(hex);
+                this.mixing = true;
+              }
+              this.buildTools();
+              this.buildPalette();
+              this.buildMixer();
+              this.refreshReadout();
+            },
+          },
+        }),
+      );
+    });
+
+    if (this.design.mixed.length < MIXED_LIMIT) {
+      this.paletteRow.append(
+        el('button', {
+          class: `swatch swatch-mix${this.mixing ? ' is-active' : ''}`,
+          attrs: { type: 'button', 'aria-label': TEXT.mixColour, title: TEXT.mixColour },
+          text: '＋',
+          on: {
+            click: () => {
+              this.mixing = !this.mixing;
+              this.buildPalette();
+              this.buildMixer();
+            },
+          },
+        }),
+      );
+    }
+  }
+
+  /** Pulls the three numbers back out of a colour. */
+  private readMix(hex: string): void {
+    this.mixRed = parseInt(hex.slice(1, 3), 16);
+    this.mixGreen = parseInt(hex.slice(3, 5), 16);
+    this.mixBlue = parseInt(hex.slice(5, 7), 16);
+  }
+
+  /** The colour the three numbers currently make. */
+  private mixHex(): string {
+    const part = (value: number): string =>
+      Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0');
+    return `#${part(this.mixRed)}${part(this.mixGreen)}${part(this.mixBlue)}`;
+  }
+
+  /**
+   * The little window for mixing a colour of your own.
+   *
+   * Three sliders and a patch showing the result. If the colour you are
+   * standing on is one you mixed, the sliders change it in place and every
+   * cube already painted with it follows along; otherwise mixing adds a new
+   * one to the row.
+   */
+  private buildMixer(): void {
+    clear(this.mixWindow);
+    this.mixWindow.classList.toggle('is-closed', !this.mixing);
+    if (!this.mixing) return;
+
+    const editing = this.colour >= MIXED_BASE;
+    const patch = el('div', {
+      class: 'mixer-patch',
+      attrs: { style: `background:${this.mixHex()}` },
+    });
+    const readout = el('span', { class: 'mixer-hex', text: this.mixHex() });
+
+    const change = (): void => {
+      const hex = this.mixHex();
+      patch.setAttribute('style', `background:${hex}`);
+      readout.textContent = hex;
+      if (editing) {
+        // Changing a colour changes it everywhere it has been used.
+        this.design.mixed[this.colour - MIXED_BASE] = hex;
+        this.rebuild();
+        this.buildPalette();
+        this.refreshReadout();
+      }
+    };
+
+    const bar = (label: string, get: () => number, set: (value: number) => void): HTMLElement => {
+      const input = el('input', {
+        attrs: {
+          type: 'range',
+          min: '0',
+          max: '255',
+          step: '1',
+          value: String(get()),
+          'aria-label': label,
+        },
+        on: {
+          input: (event) => {
+            set(Number((event.target as HTMLInputElement).value));
+            change();
+          },
+        },
+      });
+      return el('label', { class: `mixer-bar mixer-${label}` }, el('span', { text: label }), input);
+    };
+
+    this.mixWindow.append(
+      el(
+        'div',
+        { class: 'mixer-top' },
+        patch,
+        readout,
+        el('span', { class: 'mixer-note', text: editing ? TEXT.mixEditing : TEXT.mixNew }),
+      ),
+      bar('R', () => this.mixRed, (value) => (this.mixRed = value)),
+      bar('G', () => this.mixGreen, (value) => (this.mixGreen = value)),
+      bar('B', () => this.mixBlue, (value) => (this.mixBlue = value)),
+      el(
+        'div',
+        { class: 'mixer-buttons' },
+        editing
+          ? button(TEXT.close, () => {
+              this.mixing = false;
+              this.buildPalette();
+              this.buildMixer();
+            }, 'ghost')
+          : button(TEXT.mixAdd, () => {
+              if (this.design.mixed.length >= MIXED_LIMIT) return;
+              this.design.mixed.push(this.mixHex());
+              this.colour = MIXED_BASE + this.design.mixed.length - 1;
+              this.tool = 'paint';
+              this.buildTools();
+              this.buildPalette();
+              this.buildMixer();
+              this.refreshReadout();
+            }),
+      ),
+    );
   }
 
   private setupScene(): void {
@@ -353,6 +515,7 @@ export class BallEditor {
       photo: this.design.photo,
       photoStrength: this.design.photoStrength,
       shine: this.design.shine,
+      mixed: [...this.design.mixed],
     };
   }
 
@@ -388,7 +551,7 @@ export class BallEditor {
     }
     const previousMap = this.material?.map ?? null;
     this.material?.dispose();
-    const built = buildBallGeometry(this.design.voxels, 1);
+    const built = buildBallGeometry(this.design.voxels, 1, this.design.mixed);
     this.faces = built.faces;
     this.material = makeBallMaterial(this.design.shine);
     if (previousMap) this.material.map = previousMap;
@@ -592,7 +755,11 @@ export class BallEditor {
       (target.z - SHAPE_CENTRE) * CUBE_METRES,
     );
     const tint =
-      this.tool === 'remove' ? '#ff7b7b' : this.tool === 'add' ? '#ffd166' : PALETTE[this.colour];
+      this.tool === 'remove'
+        ? '#ff7b7b'
+        : this.tool === 'add'
+          ? '#ffd166'
+          : colourAt(this.colour, this.design.mixed);
     (this.markerFace?.material as MeshBasicMaterial | undefined)?.color.set(tint);
     (this.markerEdges?.material as LineBasicMaterial | undefined)?.color.set('#ffffff');
   }
@@ -659,7 +826,11 @@ export class BallEditor {
           ? TEXT.toolAdd
           : TEXT.toolPaint;
     const tint =
-      this.tool === 'remove' ? '#ff7b7b' : this.tool === 'add' ? '#ffd166' : PALETTE[this.colour];
+      this.tool === 'remove'
+        ? '#ff7b7b'
+        : this.tool === 'add'
+          ? '#ffd166'
+          : colourAt(this.colour, this.design.mixed);
     this.readout.append(
       el('span', { class: 'editor-readout-swatch', attrs: { style: `background:${tint}` } }),
       el('span', { text: `${TEXT.editorTarget}: ${label}` }),

@@ -14,6 +14,10 @@ import { TEXT, formatSpeed, formatTime } from './text';
 
 export class Hud {
   readonly root: HTMLElement;
+  /** The glow at the edges of the screen when moving fast. */
+  private readonly rush = el('div', { class: 'speed-rush' });
+  /** How far ahead of, or behind, the best run so far. */
+  private readonly gap = el('div', { class: 'hud-gap is-hidden' });
   private readonly timeValue: HTMLElement;
   private readonly speedValue: HTMLElement;
   private readonly bestValue: HTMLElement;
@@ -52,6 +56,8 @@ export class Hud {
     this.root = el(
       'div',
       { class: 'hud', id: 'hud' },
+      this.rush,
+      this.gap,
       el(
         'div',
         { class: 'hud-top' },
@@ -93,6 +99,40 @@ export class Hud {
   }
 
   /** Refreshes everything from the run in progress. */
+  /**
+   * Shows how the run compares with the best one so far.
+   *
+   * Read as a clock reads: a plus is time you have lost. It only appears
+   * once there is something to say, so it never sits there at zero being
+   * ignored.
+   *
+   * @param seconds behind (positive) or ahead (negative), or null for nothing
+   */
+  setGap(seconds: number | null): void {
+    if (seconds === null) {
+      this.gap.classList.add('is-hidden');
+      return;
+    }
+    const behind = seconds > 0;
+    const shown = Math.abs(seconds);
+    this.gap.textContent = `${behind ? '+' : '−'}${shown.toFixed(2)}`;
+    this.gap.classList.toggle('is-behind', behind);
+    this.gap.classList.toggle('is-ahead', !behind);
+    this.gap.classList.remove('is-hidden');
+  }
+
+  /**
+   * Brightens the edges of the screen the faster the ball is going.
+   *
+   * Speed is hard to feel in a game where the camera keeps the ball in the
+   * same place on screen. This gives the eye something that changes with it.
+   */
+  setRush(speed: number): void {
+    // Six metres a second is a good roll; twelve is about as fast as it goes.
+    const amount = Math.min(1, Math.max(0, (speed - 6) / 6));
+    this.rush.style.opacity = String(amount);
+  }
+
   update(session: Session): void {
     const world: World = session.world;
     this.timeValue.textContent = formatTime(session.seconds);
@@ -184,6 +224,7 @@ export class Hud {
 
   /** Puts the countdown back to the start for a fresh attempt. */
   reset(): void {
+    this.gap.classList.add('is-hidden');
     this.lastCountdown = -1;
     this.lastFalls = 0;
     this.lastStallSecond = -1;

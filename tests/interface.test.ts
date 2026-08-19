@@ -444,7 +444,7 @@ describe('what is kept between visits', () => {
   });
 
   it('keeps the settings, within sensible limits', () => {
-    saveSettings({ zoom: 99, richGraphics: false, sound: false, invertPush: true });
+    saveSettings({ zoom: 99, richGraphics: false, sound: false, invertPush: true, ghost: true });
     const loaded = loadSettings();
     expect(loaded.zoom).toBeLessThanOrEqual(2);
     expect(loaded.richGraphics).toBe(false);

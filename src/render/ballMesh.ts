@@ -22,6 +22,7 @@ import {
 } from 'three';
 import {
   CUBE_METRES,
+  MIXED_BASE,
   PALETTE,
   SHAPE_CENTRE,
   SHAPE_SIZE,
@@ -139,13 +140,23 @@ const DIRECTIONS: {
 
 const paletteColours = PALETTE.map((hex) => new Color(hex));
 
+/** Colours mixed by hand, kept as objects so they are not rebuilt per cube. */
+function mixedColours(mixed: readonly string[]): Color[] {
+  return mixed.map((hex) => new Color(hex));
+}
+
 /**
  * Builds the mesh for a design.
  *
  * @param voxels the cube slots
  * @param scale how much to stretch the result, where 1 is the standard size
  */
-export function buildBallGeometry(voxels: Uint8Array, scale = 1): BallGeometry {
+export function buildBallGeometry(
+  voxels: Uint8Array,
+  scale = 1,
+  mixed: readonly string[] = [],
+): BallGeometry {
+  const extra = mixedColours(mixed);
   const positions: number[] = [];
   const normals: number[] = [];
   const colours: number[] = [];
@@ -162,7 +173,10 @@ export function buildBallGeometry(voxels: Uint8Array, scale = 1): BallGeometry {
       for (let z = 0; z < SHAPE_SIZE; z++) {
         const slot = voxels[cellIndex(x, y, z)];
         if (slot === 0) continue;
-        const colour = paletteColours[slot] ?? paletteColours[8];
+        const colour =
+          slot >= MIXED_BASE
+            ? extra[slot - MIXED_BASE] ?? paletteColours[8]
+            : paletteColours[slot] ?? paletteColours[8];
 
         for (const dir of DIRECTIONS) {
           const [nx, ny, nz] = dir.normal;
@@ -277,8 +291,9 @@ export function buildBallMesh(
   voxels: Uint8Array,
   shine: number,
   scale = 1,
+  mixed: readonly string[] = [],
 ): { mesh: Mesh; faces: FaceInfo[]; material: MeshStandardMaterial } {
-  const { geometry, faces } = buildBallGeometry(voxels, scale);
+  const { geometry, faces } = buildBallGeometry(voxels, scale, mixed);
   const material = makeBallMaterial(shine);
   const mesh = new Mesh(geometry, material);
   mesh.castShadow = true;

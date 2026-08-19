@@ -169,3 +169,28 @@ describe('loading a course that has been hand-edited', () => {
     expect(result.metres).toBeGreaterThan(70);
   });
 });
+
+describe('parking a course instead of deleting it', () => {
+  it('keeps a course out of the game when it says so', () => {
+    const off = raw.courses.filter((course) => course.inGame === false);
+    for (const course of off) {
+      expect(STAGES.some((stage) => stage.id === course.id)).toBe(false);
+    }
+    // And everything else is in.
+    const on = raw.courses.filter((course) => course.inGame !== false);
+    expect(STAGES).toHaveLength(on.length);
+  });
+
+  it('treats a course that says nothing as one that is in', () => {
+    // Hand-written files should not need the extra line.
+    const written = { id: 'quiet', pieces: [{ length: 30 }] } as unknown as StoredCourse;
+    expect(written.inGame).toBeUndefined();
+    const stage = stageFromStored(written, 0);
+    expect(stage.id).toBe('quiet');
+  });
+
+  it('no longer carries the course that was made and then dropped', () => {
+    expect(raw.courses.some((course) => course.id === 'course-4')).toBe(false);
+    expect(STAGES).toHaveLength(3);
+  });
+});

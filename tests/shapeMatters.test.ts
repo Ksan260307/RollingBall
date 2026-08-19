@@ -79,14 +79,33 @@ describe('how bumpy a shape is', () => {
     expect(manyBumps).toBeGreaterThan(oneBump);
   });
 
-  it('scores a box, a lumpy ball and a chaotic one as bumpy', () => {
+  it('scores a box and a lumpy ball as bumpy', () => {
     const boxy = toNumber(ballFeelFrom(measureShape(cubeShape())).bumpiness);
     const lumpy = toNumber(ballFeelFrom(measureShape(lumpyShape())).bumpiness);
-    const chaotic = toNumber(ballFeelFrom(measureShape(randomShape(1))).bumpiness);
-    for (const value of [boxy, lumpy, chaotic]) {
+    for (const value of [boxy, lumpy]) {
       expect(value).toBeGreaterThan(0.2);
       expect(value).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('scores most chaotic balls as bumpier than a round one', () => {
+    // Pinning one seed says nothing useful now there are two dozen styles:
+    // some of them (a potato, a stack of discs) are genuinely smooth, and
+    // that is the point of having a lot of them. What must hold is that the
+    // chaotic ones are bumpier than a proper ball as a rule.
+    const round = toNumber(ballFeelFrom(measureShape(defaultShape())).bumpiness);
+    const scores: number[] = [];
+    for (let seed = 1; seed <= 60; seed++) {
+      scores.push(toNumber(ballFeelFrom(measureShape(randomShape(seed))).bumpiness));
+    }
+    for (const value of scores) {
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
+    }
+    const bumpier = scores.filter((value) => value > round).length;
+    expect(bumpier).toBeGreaterThan(scores.length * 0.7);
+    const average = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    expect(average).toBeGreaterThan(0.2);
   });
 
   it('makes a bumpy ball drag more and hold on less', () => {

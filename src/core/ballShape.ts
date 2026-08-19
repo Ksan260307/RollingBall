@@ -85,6 +85,35 @@ export const PALETTE = [
 /** How many swatches sit on one row of the workshop's palette. */
 export const PALETTE_ROW = 9;
 
+/**
+ * Where the colours a player mixed themselves begin.
+ *
+ * Cube slots hold a whole number, so the ready-made colours sit at the
+ * bottom and anything mixed by hand is counted from here. Leaving a gap
+ * means more ready-made colours can be added later without disturbing a
+ * ball somebody has already made.
+ */
+export const MIXED_BASE = 64;
+
+/** How many colours can be mixed for one ball. */
+export const MIXED_LIMIT = 12;
+
+/**
+ * The colour a cube slot stands for.
+ *
+ * @param slot what the cube holds
+ * @param mixed the colours mixed for this particular ball
+ */
+export function colourAt(slot: number, mixed: readonly string[] = []): string {
+  if (slot >= MIXED_BASE) return mixed[slot - MIXED_BASE] ?? PALETTE[8];
+  return PALETTE[slot] ?? PALETTE[8];
+}
+
+/** True if a piece of text is a colour we can actually use. */
+export function isColour(text: unknown): text is string {
+  return typeof text === 'string' && /^#[0-9a-f]{6}$/i.test(text);
+}
+
 /** Half a cube, in stored metres; distances are measured in half-cube steps. */
 const HALF_CUBE = Math.round((CUBE_METRES / 2) * ONE);
 
@@ -220,7 +249,7 @@ function countFilled(voxels: Uint8Array): number {
 }
 
 /** The kinds of chaotic ball the workshop can throw together. */
-const RANDOM_STYLES = 10;
+const RANDOM_STYLES = 24;
 
 /** A whole number from the generator, as a decimal between -1 and 1. */
 function spread(rng: Generator): number {
@@ -305,7 +334,7 @@ function prong(
 
 /** Paints a finished shape in one of several ways, purely for the look. */
 function paintRandomly(voxels: Uint8Array, rng: Generator, colour: number): void {
-  const scheme = rng.below(6);
+  const scheme = rng.below(12);
   const other = 1 + rng.below(PALETTE.length - 1);
   const third = 1 + rng.below(PALETTE.length - 1);
   const cutX = spread(rng);
@@ -344,12 +373,50 @@ function paintRandomly(voxels: Uint8Array, rng: Generator, colour: number): void
             voxels[index] = [colour, other, third][pick];
             break;
           }
-          default:
+          case 5:
             // Checked, in blocks of three.
             voxels[index] =
               (Math.floor(x / 3) + Math.floor(y / 3) + Math.floor(z / 3)) % 2 === 0
                 ? colour
                 : other;
+            break;
+          case 6: {
+            // Stripes running round one way, like a beach ball.
+            const round = Math.round((Math.atan2(dz, dx) / Math.PI) * 4);
+            voxels[index] = round % 2 === 0 ? colour : other;
+            break;
+          }
+          case 7: {
+            // A cap of another colour on top, and one underneath.
+            const height = dy / Math.max(1, SHAPE_CENTRE);
+            voxels[index] = height > 0.45 ? other : height < -0.45 ? third : colour;
+            break;
+          }
+          case 8: {
+            // Patches, big and soft-edged.
+            const patch = mix(Math.floor(x / 4), Math.floor(y / 4), Math.floor(z / 4)) % 3;
+            voxels[index] = [colour, other, third][patch];
+            break;
+          }
+          case 9: {
+            // Fading out from the middle through three shades.
+            const far = Math.sqrt(dx * dx + dy * dy + dz * dz) / Math.max(1, SHAPE_CENTRE);
+            voxels[index] = far > 0.8 ? third : far > 0.5 ? other : colour;
+            break;
+          }
+          case 10: {
+            // Quarters, like a beach ball seen end on.
+            const quarter = (dx > 0 ? 1 : 0) + (dz > 0 ? 2 : 0);
+            voxels[index] = [colour, other, third, colour][quarter];
+            break;
+          }
+          default: {
+            // A spiral wound round the middle.
+            const round = Math.atan2(dz, dx) / (Math.PI * 2);
+            const along = dy / Math.max(1, SHAPE_CENTRE);
+            voxels[index] = Math.floor((round + along) * 4) % 2 === 0 ? colour : other;
+            break;
+          }
             break;
         }
       }
@@ -551,7 +618,7 @@ export function randomShape(seed: number, colour = 6): Uint8Array {
       }
       break;
     }
-    default: {
+    case 9: {
       // A staircase of blocks winding around the middle.
       const turns = 3 + rng.below(6);
       const rise = (reach * 1.6) / turns;
@@ -568,6 +635,290 @@ export function randomShape(seed: number, colour = 6): Uint8Array {
           reach * 0.28,
           1,
         );
+      }
+      break;
+    }
+    case 10: {
+      // Studded all over with short stubs: a sweet covered in sugar.
+      blob(voxels, middle, middle, middle, reach * (0.62 + unit(rng) * 0.16), 1);
+      const studs = 14 + rng.below(20);
+      for (let stud = 0; stud < studs; stud++) {
+        const dx = spread(rng);
+        const dy = spread(rng);
+        const dz = spread(rng);
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        prong(
+          voxels,
+          middle,
+          middle,
+          middle,
+          dx / length,
+          dy / length,
+          dz / length,
+          Math.round(reach * (0.8 + unit(rng) * 0.2)),
+          2.4,
+          1,
+        );
+      }
+      break;
+    }
+    case 11: {
+      // A coil wound round and round: a spring.
+      const loops = 2 + rng.below(4);
+      const out = reach * (0.5 + unit(rng) * 0.3);
+      const thick = 1.6 + unit(rng) * 1.4;
+      const steps = Math.round(reach * 9);
+      for (let step = 0; step <= steps; step++) {
+        const t = step / steps;
+        const angle = t * Math.PI * 2 * loops;
+        blob(
+          voxels,
+          middle + Math.cos(angle) * out,
+          middle - reach * 0.85 + t * reach * 1.7,
+          middle + Math.sin(angle) * out,
+          thick,
+          1,
+        );
+      }
+      break;
+    }
+    case 12: {
+      // A block with its corners knocked off, and pips dug into the faces.
+      slab(voxels, middle, middle, middle, reach * 0.78, reach * 0.78, reach * 0.78, 1);
+      const knock = reach * (0.9 + unit(rng) * 0.3);
+      for (const cx of [-1, 1]) {
+        for (const cy of [-1, 1]) {
+          for (const cz of [-1, 1]) {
+            blob(
+              voxels,
+              middle + cx * reach * 0.78,
+              middle + cy * reach * 0.78,
+              middle + cz * reach * 0.78,
+              reach * 0.78 * 1.42 - knock * 0.6,
+              0,
+            );
+          }
+        }
+      }
+      const pips = 3 + rng.below(6);
+      for (let pip = 0; pip < pips; pip++) {
+        const face = rng.below(6);
+        const along = reach * 0.8;
+        blob(
+          voxels,
+          middle + (face === 0 ? along : face === 1 ? -along : spread(rng) * reach * 0.45),
+          middle + (face === 2 ? along : face === 3 ? -along : spread(rng) * reach * 0.45),
+          middle + (face === 4 ? along : face === 5 ? -along : spread(rng) * reach * 0.45),
+          reach * (0.14 + unit(rng) * 0.1),
+          0,
+        );
+      }
+      break;
+    }
+    case 13: {
+      // Shells inside shells, with a slice taken out so you can see in.
+      const shells = 2 + rng.below(3);
+      for (let shell = 0; shell < shells; shell++) {
+        const outer = reach * (0.95 - shell * 0.3);
+        blob(voxels, middle, middle, middle, outer, 1);
+        blob(voxels, middle, middle, middle, outer - reach * 0.12, 0);
+      }
+      blob(voxels, middle, middle, middle, reach * 0.2, 1);
+      // The slice: a quarter taken away.
+      const keepX = spread(rng) > 0 ? 1 : -1;
+      const keepZ = spread(rng) > 0 ? 1 : -1;
+      for (let x = 0; x < SHAPE_SIZE; x++) {
+        for (let y = 0; y < SHAPE_SIZE; y++) {
+          for (let z = 0; z < SHAPE_SIZE; z++) {
+            if ((x - middle) * keepX > 0 && (z - middle) * keepZ > 0) {
+              voxels[cellIndex(x, y, z)] = 0;
+            }
+          }
+        }
+      }
+      break;
+    }
+    case 14: {
+      // Two rings threaded through each other.
+      for (const axis of [0, 1]) {
+        blob(voxels, middle, middle, middle, reach * 0.9, 1);
+        const bore = reach * (0.3 + unit(rng) * 0.15);
+        for (let step = -SHAPE_SIZE; step <= SHAPE_SIZE; step++) {
+          blob(
+            voxels,
+            middle + (axis === 0 ? step : 0),
+            middle + (axis === 1 ? step : 0),
+            middle,
+            bore,
+            0,
+          );
+        }
+      }
+      break;
+    }
+    case 15: {
+      // Spikes on one side only, so it never settles the same way twice.
+      blob(voxels, middle, middle, middle, reach * (0.6 + unit(rng) * 0.2), 1);
+      const side = spread(rng) > 0 ? 1 : -1;
+      const spikes = 5 + rng.below(7);
+      for (let spike = 0; spike < spikes; spike++) {
+        const dy = Math.abs(spread(rng)) * side;
+        const dx = spread(rng);
+        const dz = spread(rng);
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        prong(
+          voxels,
+          middle,
+          middle,
+          middle,
+          dx / length,
+          dy / length,
+          dz / length,
+          Math.round(reach * (0.9 + unit(rng) * 0.3)),
+          1.8,
+          1,
+        );
+      }
+      break;
+    }
+    case 16: {
+      // Sliced away on four slants: something between a top and a pyramid.
+      blob(voxels, middle, middle, middle, reach * 0.95, 1);
+      const point = spread(rng) > 0 ? 1 : -1;
+      for (let x = 0; x < SHAPE_SIZE; x++) {
+        for (let y = 0; y < SHAPE_SIZE; y++) {
+          for (let z = 0; z < SHAPE_SIZE; z++) {
+            const up = (y - middle) * point;
+            const wide = Math.max(Math.abs(x - middle), Math.abs(z - middle));
+            if (wide > reach * 0.95 - up * 0.9) voxels[cellIndex(x, y, z)] = 0;
+          }
+        }
+      }
+      break;
+    }
+    case 17: {
+      // A folded sheet, like a crisp.
+      const thick = 1.4 + unit(rng) * 1.2;
+      const waves = 1 + unit(rng) * 2;
+      const depth = reach * (0.3 + unit(rng) * 0.4);
+      for (let x = 0; x < SHAPE_SIZE; x++) {
+        for (let z = 0; z < SHAPE_SIZE; z++) {
+          const dx = (x - middle) / reach;
+          const dz = (z - middle) / reach;
+          if (dx * dx + dz * dz > 1) continue;
+          const lift = Math.sin(dx * Math.PI * waves) * Math.cos(dz * Math.PI * waves) * depth;
+          blob(voxels, x, middle + lift, z, thick, 1);
+        }
+      }
+      break;
+    }
+    case 18: {
+      // A bunch of berries pressed together.
+      const berries = 8 + rng.below(10);
+      for (let berry = 0; berry < berries; berry++) {
+        const dx = spread(rng);
+        const dy = spread(rng);
+        const dz = spread(rng);
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        const out = reach * (0.35 + unit(rng) * 0.4);
+        blob(
+          voxels,
+          middle + (dx / length) * out,
+          middle + (dy / length) * out,
+          middle + (dz / length) * out,
+          reach * (0.2 + unit(rng) * 0.16),
+          1,
+        );
+      }
+      blob(voxels, middle, middle, middle, reach * 0.34, 1);
+      break;
+    }
+    case 19: {
+      // Craters scooped out of the surface: the moon.
+      blob(voxels, middle, middle, middle, reach * 0.95, 1);
+      const craters = 5 + rng.below(8);
+      for (let crater = 0; crater < craters; crater++) {
+        const dx = spread(rng);
+        const dy = spread(rng);
+        const dz = spread(rng);
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        const size = reach * (0.24 + unit(rng) * 0.3);
+        blob(
+          voxels,
+          middle + (dx / length) * reach,
+          middle + (dy / length) * reach,
+          middle + (dz / length) * reach,
+          size,
+          0,
+        );
+      }
+      break;
+    }
+    case 20: {
+      // A column given a twist.
+      const height = reach * (0.8 + unit(rng) * 0.2);
+      const twist = (1 + unit(rng) * 3) * Math.PI;
+      const arm = reach * (0.4 + unit(rng) * 0.3);
+      const arms = 2 + rng.below(3);
+      const steps = Math.round(height * 4);
+      for (let step = 0; step <= steps; step++) {
+        const t = step / steps;
+        const y = middle - height + t * height * 2;
+        for (let a = 0; a < arms; a++) {
+          const angle = t * twist + (a / arms) * Math.PI * 2;
+          blob(voxels, middle + Math.cos(angle) * arm, y, middle + Math.sin(angle) * arm, 2, 1);
+        }
+      }
+      blob(voxels, middle, middle, middle, reach * 0.22, 1);
+      break;
+    }
+    case 21: {
+      // A ball with one great bite taken out of it.
+      blob(voxels, middle, middle, middle, reach * 0.95, 1);
+      const dx = spread(rng);
+      const dy = spread(rng);
+      const dz = spread(rng);
+      const length = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+      const out = reach * (0.85 + unit(rng) * 0.3);
+      blob(
+        voxels,
+        middle + (dx / length) * out,
+        middle + (dy / length) * out,
+        middle + (dz / length) * out,
+        reach * (0.6 + unit(rng) * 0.3),
+        0,
+      );
+      break;
+    }
+    case 22: {
+      // Stacked discs of different sizes: a spinning top, or a cake.
+      const layers = 3 + rng.below(4);
+      const step = (reach * 1.8) / layers;
+      for (let layer = 0; layer < layers; layer++) {
+        const wide = reach * (0.3 + unit(rng) * 0.6);
+        slab(
+          voxels,
+          middle,
+          middle - reach * 0.9 + step * (layer + 0.5),
+          middle,
+          wide,
+          step * 0.55,
+          wide,
+          1,
+        );
+      }
+      break;
+    }
+    default: {
+      // A frame: the edges of a box with the faces missing.
+      const half = reach * (0.7 + unit(rng) * 0.25);
+      const bar = 1.4 + unit(rng) * 1.4;
+      for (const a of [-1, 1]) {
+        for (const b of [-1, 1]) {
+          slab(voxels, middle, middle + a * half, middle + b * half, half, bar, bar, 1);
+          slab(voxels, middle + a * half, middle, middle + b * half, bar, half, bar, 1);
+          slab(voxels, middle + a * half, middle + b * half, middle, bar, bar, half, 1);
+        }
       }
       break;
     }

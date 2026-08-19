@@ -316,3 +316,19 @@ h2:first-child {
     border-bottom: 1px solid var(--edge);
   }
 }
+
+/* A plain switch reads better on one line than stacked like the other fields. */
+label.tick {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+label.tick input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin: 0;
+}
