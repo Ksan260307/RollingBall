@@ -53,7 +53,22 @@ const BASE_HEIGHT = 3.1;
 const LOOK_AHEAD = 6.0;
 
 /** How many sparkle pieces can be in the air at once. */
-const SPARKLE_COUNT = 48;
+const SPARKLE_COUNT = 72;
+
+/** How long the ball takes to burst through the finish and vanish. */
+const BREAKTHROUGH_SECONDS = 2.6;
+
+/** The ways the camera can watch a replay. */
+export const CAMERA_STYLES = [
+  'chase',
+  'low',
+  'high',
+  'side',
+  'ahead',
+  'close',
+] as const;
+
+export type CameraStyle = (typeof CAMERA_STYLES)[number];
 
 const scratchPosition = new Vector3();
 const scratchTarget = new Vector3();
@@ -62,6 +77,7 @@ const scratchQuaternion = new Quaternion();
 const scratchScale = new Vector3(1, 1, 1);
 const scratchAxis = new Vector3();
 const scratchForward = new Vector3();
+const scratchRight = new Vector3();
 const spinScratch = emptySpin();
 
 /** Builds a soft top-to-bottom gradient for the sky dome. */
@@ -112,11 +128,20 @@ export class GameView {
   private cameraPosition = new Vector3();
   private cameraTarget = new Vector3();
   private cameraReady = false;
+  private lastStyle: CameraStyle = 'chase';
 
   /** How far back the camera sits, as a multiplier of the standard distance. */
   zoom = 1;
   /** Turns the heavier effects off on slower devices. */
   richGraphics = true;
+  /** How the camera watches the ball. Replays cycle through the lot. */
+  cameraStyle: CameraStyle = 'chase';
+
+  /** Set while the ball is bursting through the finish and away. */
+  private breakthrough = 0;
+  private readonly breakAway = new Vector3();
+  /** The colour of the course edging, for the pieces that fly off. */
+  private edgeColour = '#ffd166';
 
   private readonly canvas: HTMLCanvasElement;
   private lastWidth = 0;
@@ -226,6 +251,7 @@ export class GameView {
 
   /** Swaps in a new course and its colours. */
   setStage(stage: Stage, course: Course): void {
+    this.edgeColour = stage.mood.edge;
     if (this.courseMesh) {
       this.scene.remove(this.courseMesh);
       disposeCourseMesh(this.courseMesh);
@@ -375,6 +401,56 @@ export class GameView {
     }
   }
 
+  /**
+   * Sends the ball crashing on through the finish and away into the
+   * distance, rather than stopping dead on the line.
+   *
+   * The rules have already finished the run by this point, so nothing here
+   * can change the result: this is the ball taking its bow.
+   */
+  startBreakthrough(world: World): void {
+    const speed = Math.max(6, world.speedFor(0) / ONE);
+    const point = Math.min(world.course.count - 1, Math.max(0, courseIndexOf(world)));
+    this.breakAway
+      .set(
+        toMetres(world.course.forwardX[point]),
+        toMetres(world.course.forwardY[point]),
+        toMetres(world.course.forwardZ[point]),
+      )
+      .normalize()
+      .multiplyScalar(speed * 1.35);
+    // A shove upward as well, so it arcs away rather than boring into the hill.
+    this.breakAway.y += speed * 0.35;
+    this.breakthrough = BREAKTHROUGH_SECONDS;
+
+    // Pieces flying off where it went through.
+    const at = this.ballGroup.position;
+    this.burst(at.x, at.y, at.z, '#ffffff', 10);
+    this.burst(at.x, at.y, at.z, this.edgeColour, 8);
+  }
+
+  /** True while the ball is still flying off past the finish. */
+  get breakingThrough(): boolean {
+    return this.breakthrough > 0;
+  }
+
+  /** Puts the ball back to normal, ready for another run. */
+  clearBreakthrough(): void {
+    this.breakthrough = 0;
+    this.setBallVisible(true);
+  }
+
+  /**
+   * Shows or hides the ball.
+   *
+   * Once it has gone through the finish it is somewhere over the hill, so
+   * it should not still be sitting on the line behind the results.
+   */
+  setBallVisible(on: boolean): void {
+    this.ballGroup.visible = on;
+    if (on) this.ballGroup.scale.setScalar(1);
+  }
+
   /** Starts a burst of sparkles at a point. */
   burst(x: number, y: number, z: number, colour: string, count = 6): void {
     for (let n = 0; n < count; n++) {
@@ -440,6 +516,31 @@ export class GameView {
     const by = py + (ny - py) * alpha;
     const bz = pz + (nz - pz) * alpha;
 
+    if (this.breakthrough > 0) {
+      // Carrying on past the line under its own steam, shrinking away.
+      this.breakthrough = Math.max(0, this.breakthrough - delta);
+      const gone = 1 - this.breakthrough / BREAKTHROUGH_SECONDS;
+      this.breakAway.y -= 9.8 * delta * 0.25;
+      this.ballGroup.position.addScaledVector(this.breakAway, delta);
+      // Holds its size while it is still worth watching, then goes.
+      this.ballGroup.scale.setScalar(Math.max(0.001, 1 - gone * gone * gone));
+      this.ballGroup.visible = this.breakthrough > 0;
+      this.spinBall(world, delta * 2.4);
+      // The camera plants itself where it was and turns to watch, so the
+      // course stays in the foreground while the ball tears away from it.
+      this.camera.position.copy(this.cameraPosition);
+      this.cameraTarget.lerp(this.ballGroup.position, 1 - Math.exp(-11 * delta));
+      this.camera.lookAt(this.cameraTarget);
+      this.updateScenery(world, seconds);
+      this.updateSparkles(delta);
+      this.sunlight.position.set(bx - 24, by + 46, bz - 18);
+      this.sunlight.target.position.set(bx, by, bz);
+      this.sky.position.set(bx, by, bz);
+      this.ground.position.set(bx, by - 34, bz);
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+
     this.ballGroup.position.set(bx, by, bz);
     this.spinBall(world, delta);
 
@@ -483,26 +584,63 @@ export class GameView {
       toMetres(course.forwardY[point]),
       toMetres(course.forwardZ[point]),
     );
-    const distance = BASE_DISTANCE * this.zoom;
-    const height = BASE_HEIGHT * Math.max(0.6, this.zoom);
+    let distance = BASE_DISTANCE * this.zoom;
+    let height = BASE_HEIGHT * Math.max(0.6, this.zoom);
+    let sideways = 0;
+    let facing = 1;
 
+    // Replays wander around the ball; play stays behind it where it belongs.
+    switch (this.cameraStyle) {
+      case 'low':
+        distance *= 0.8;
+        height = 0.5;
+        break;
+      case 'high':
+        distance *= 1.5;
+        height *= 4.2;
+        break;
+      case 'side':
+        distance *= 0.35;
+        sideways = 7.5;
+        height *= 0.7;
+        break;
+      case 'ahead':
+        // Out in front, looking back at the ball as it comes on.
+        facing = -1;
+        distance *= 0.9;
+        height *= 0.8;
+        break;
+      case 'close':
+        distance *= 0.42;
+        height *= 0.5;
+        sideways = 1.6;
+        break;
+      default:
+        break;
+    }
+
+    const right = scratchRight.set(-forward.z, 0, forward.x).normalize();
     scratchTarget.set(
-      bx - forward.x * distance,
-      by + height - forward.y * distance * 0.4,
-      bz - forward.z * distance,
+      bx - forward.x * distance * facing + right.x * sideways,
+      by + height - forward.y * distance * 0.4 * facing,
+      bz - forward.z * distance * facing + right.z * sideways,
     );
-    if (!this.cameraReady) {
+    if (!this.cameraReady || this.cameraStyle !== this.lastStyle) {
       this.cameraPosition.copy(scratchTarget);
       this.cameraTarget.set(bx, by, bz);
       this.cameraReady = true;
+      this.lastStyle = this.cameraStyle;
     }
     // Frame-rate independent easing: the same feel at 30 or 144 frames a second.
     const ease = 1 - Math.exp(-9 * delta);
     this.cameraPosition.lerp(scratchTarget, ease);
+    // Looking ahead down the course while chasing; straight at the ball for
+    // any of the replay angles, where the ball is the whole point.
+    const ahead = this.cameraStyle === 'chase' ? LOOK_AHEAD : 0.5;
     scratchPosition.set(
-      bx + forward.x * LOOK_AHEAD,
-      by + forward.y * LOOK_AHEAD + 0.6,
-      bz + forward.z * LOOK_AHEAD,
+      bx + forward.x * ahead,
+      by + forward.y * ahead + (this.cameraStyle === 'chase' ? 0.6 : 0.2),
+      bz + forward.z * ahead,
     );
     this.cameraTarget.lerp(scratchPosition, 1 - Math.exp(-7 * delta));
 

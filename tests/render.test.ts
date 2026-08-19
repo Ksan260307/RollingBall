@@ -16,6 +16,8 @@ import {
   pebbleShape,
 } from '../src/core/ballShape';
 import { measureShape } from '../src/core/ballShape';
+import { packControls } from '../src/core/input';
+import { WALL_HEIGHT, World } from '../src/core/simulation';
 import { ONE, toNumber } from '../src/core/fixed';
 import { buildCourseMesh, disposeCourseMesh, toMetres } from '../src/render/courseMesh';
 import { buildBallGeometry } from '../src/render/ballMesh';
@@ -250,5 +252,60 @@ describe('building the ball to look at', () => {
       // so the count grows with the surface rather than with the volume.
       expect(built.faces.length / 2).toBeLessThan(2200);
     }
+  });
+});
+
+describe('the railings', () => {
+  /** The tallest point the drawn railings reach above the floor. */
+  function drawnRailingHeight(): number {
+    const course = buildCourse([{ length: 20, drop: 0, width: 6, walls: true }], 0);
+    const group = buildCourseMesh(course, {
+      floor: '#ffffff',
+      edge: '#ffd166',
+      ground: '#334455',
+    });
+    let highest = 0;
+    group.traverse((node) => {
+      const mesh = node as Mesh;
+      const geometry = mesh.geometry as BufferGeometry | undefined;
+      const position = geometry?.getAttribute?.('position');
+      if (!position) return;
+      for (let i = 0; i < position.count; i++) highest = Math.max(highest, position.getY(i));
+    });
+    disposeCourseMesh(group);
+    return highest;
+  }
+
+  it('stand exactly as tall as the rules let the ball hit them', () => {
+    // A barrier you can see through is as bad as one you cannot see. The two
+    // numbers come from one place, and this is what holds them together.
+    expect(drawnRailingHeight()).toBeCloseTo(toMetres(WALL_HEIGHT), 5);
+  });
+
+  it('are tall enough to hold a bouncing ball on the course', () => {
+    // The point of raising them: a ball that lands hard next to a railing
+    // should be turned back rather than skipping over the top of it.
+    const course = buildCourse(
+      [
+        { length: 14, drop: 22, width: 5, walls: true },
+        { length: 40, turn: 40, drop: 4, width: 5, walls: true },
+      ],
+      0,
+    );
+    const world = new World({
+      course,
+      seed: 3,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    const hardRight = packControls({ steer: ONE, push: 0, buttons: 0 });
+    let hits = 0;
+    for (let i = 0; i < 120 * 12; i++) {
+      world.advance([hardRight]);
+      for (const moment of world.moments) if (moment.kind === 'wall') hits++;
+    }
+    // It leant on the railing all the way and the railing held.
+    expect(hits).toBeGreaterThan(0);
+    expect(world.falls[0]).toBe(0);
   });
 });

@@ -132,14 +132,15 @@ describe('rolling downhill', () => {
     expect(part).toBeLessThanOrEqual(ONE);
   });
 
-  it('picks up the lights it rolls over', () => {
+  it('leaves the scenery alone: it is there to look at, nothing more', () => {
     const world = makeWorld();
+    const before = world.scenery.count;
     let steps = 0;
     while (world.state[0] === RunState.Rolling && steps < STEPS_PER_SECOND * 60) {
       world.advance([demoControls(world, 0)]);
       steps++;
     }
-    expect(world.collected[0]).toBeGreaterThanOrEqual(0);
+    expect(world.scenery.count).toBe(before);
   });
 });
 

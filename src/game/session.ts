@@ -73,6 +73,11 @@ export class Session {
     return state === RunState.Ready || state === RunState.Rolling;
   }
 
+  /** Seconds left before a ball that is getting nowhere ends the run. */
+  get stallSeconds(): number {
+    return this.world.stallSecondsFor(0);
+  }
+
   /** Seconds on the clock. */
   get seconds(): number {
     return this.world.secondsFor(0);
@@ -130,8 +135,10 @@ export class Session {
    * edge does not end it: the ball is put back on the start line and the
    * clock keeps running.
    */
-  get outcome(): 'finished' | null {
-    return this.world.state[0] === RunState.Finished ? 'finished' : null;
+  get outcome(): 'finished' | 'stuck' | null {
+    if (this.world.state[0] === RunState.Finished) return 'finished';
+    if (this.world.state[0] === RunState.Stuck) return 'stuck';
+    return null;
   }
 
   /** How many times the ball has gone over the edge this attempt. */
@@ -146,7 +153,6 @@ export class Session {
       seconds: this.seconds,
       metres: this.world.travelled[0] / ONE,
       topSpeed: this.world.topSpeed[0] / ONE,
-      collected: this.world.collected[0],
       falls: this.world.falls[0],
       finished: this.world.state[0] === RunState.Finished,
       checksum: this.world.checksum(),
@@ -164,7 +170,6 @@ export interface RunSummary {
   seconds: number;
   metres: number;
   topSpeed: number;
-  collected: number;
   /** How many times the ball went over the edge and was put back. */
   falls: number;
   finished: boolean;

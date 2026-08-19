@@ -1,0 +1,288 @@
+{
+  "courses": [
+    {
+      "id": "meadow",
+      "name": "はじまりの丘",
+      "blurb": "幅の広いゆるやかな坂道。まずはここで転がりに慣れよう。",
+      "difficulty": 1,
+      "mood": {
+        "sky": "#8fd3ff",
+        "horizon": "#e8f7ff",
+        "ground": "#7fc98a",
+        "floor": "#f2f6e9",
+        "edge": "#ffd166",
+        "fog": 190
+      },
+      "breeze": 0,
+      "seed": 5351905,
+      "targetSeconds": 18,
+      "pieces": [
+        {
+          "length": 12,
+          "drop": 6,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "turn": -20,
+          "drop": 7,
+          "width": 9,
+          "bank": -5,
+          "walls": true
+        },
+        {
+          "length": 16,
+          "turn": 26,
+          "drop": 7,
+          "width": 9,
+          "bank": 6,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "drop": 9,
+          "width": 8
+        },
+        {
+          "length": 14,
+          "turn": -16,
+          "drop": 6,
+          "width": 8,
+          "bank": -4,
+          "walls": true
+        },
+        {
+          "length": 10,
+          "drop": 5,
+          "width": 8,
+          "surface": "boost"
+        },
+        {
+          "length": 12,
+          "turn": 14,
+          "drop": 7,
+          "width": 9,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "drop": 4,
+          "width": 10,
+          "walls": true
+        }
+      ]
+    },
+    {
+      "id": "valley",
+      "name": "風わたる谷",
+      "blurb": "すべりやすい路面と横風。カーブのふくらみに気をつけて。",
+      "difficulty": 2,
+      "mood": {
+        "sky": "#5a7fd6",
+        "horizon": "#ffd9a8",
+        "ground": "#3f6b7d",
+        "floor": "#dfeaf5",
+        "edge": "#7ce0ff",
+        "fog": 150
+      },
+      "breeze": 0.55,
+      "seed": 2914227,
+      "targetSeconds": 17,
+      "pieces": [
+        {
+          "length": 10,
+          "drop": 8,
+          "width": 8,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "turn": 30,
+          "drop": 7,
+          "width": 7,
+          "bank": 9,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "drop": 6,
+          "width": 6,
+          "surface": "slick"
+        },
+        {
+          "length": 16,
+          "turn": -34,
+          "drop": 7,
+          "width": 7,
+          "bank": -10,
+          "walls": true
+        },
+        {
+          "length": 10,
+          "drop": 10,
+          "width": 6,
+          "surface": "slick"
+        },
+        {
+          "length": 12,
+          "turn": 22,
+          "drop": 6,
+          "width": 7,
+          "bank": 7
+        },
+        {
+          "length": 10,
+          "drop": 5,
+          "width": 7,
+          "surface": "boost"
+        },
+        {
+          "length": 12,
+          "turn": -18,
+          "drop": 7,
+          "width": 8,
+          "walls": true
+        },
+        {
+          "length": 8,
+          "drop": 4,
+          "width": 9,
+          "walls": true
+        }
+      ]
+    },
+    {
+      "id": "skyway",
+      "name": "星ふる回廊",
+      "blurb": "細い足場ととぎれた床。いきおいをつけて飛びこえよう。",
+      "difficulty": 3,
+      "mood": {
+        "sky": "#1b1e3d",
+        "horizon": "#6b4fa8",
+        "ground": "#161a33",
+        "floor": "#c9d6ff",
+        "edge": "#ff9de2",
+        "fog": 130
+      },
+      "breeze": 0.3,
+      "seed": 10435845,
+      "targetSeconds": 15,
+      "pieces": [
+        {
+          "length": 10,
+          "drop": 9,
+          "width": 7,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": 18,
+          "drop": 8,
+          "width": 5
+        },
+        {
+          "length": 8,
+          "drop": 3,
+          "width": 5,
+          "surface": "boost"
+        },
+        {
+          "length": 4,
+          "drop": 13,
+          "width": 5,
+          "gap": true
+        },
+        {
+          "length": 12,
+          "turn": -24,
+          "drop": 6,
+          "width": 5,
+          "bank": -8
+        },
+        {
+          "length": 10,
+          "drop": 6,
+          "width": 4,
+          "surface": "rough"
+        },
+        {
+          "length": 8,
+          "drop": 3,
+          "width": 5,
+          "surface": "boost"
+        },
+        {
+          "length": 4,
+          "drop": 13,
+          "width": 5,
+          "gap": true
+        },
+        {
+          "length": 14,
+          "turn": 28,
+          "drop": 7,
+          "width": 6,
+          "bank": 9,
+          "walls": true
+        },
+        {
+          "length": 10,
+          "drop": 6,
+          "width": 5,
+          "surface": "slick"
+        },
+        {
+          "length": 8,
+          "drop": 5,
+          "width": 6
+        },
+        {
+          "length": 10,
+          "drop": 4,
+          "width": 8,
+          "walls": true
+        }
+      ]
+    },
+    {
+      "id": "course-4",
+      "name": "ぐねぐね",
+      "blurb": "",
+      "difficulty": 1,
+      "mood": {
+        "sky": "#8fd3ff",
+        "horizon": "#e8f7ff",
+        "ground": "#7fc98a",
+        "floor": "#f2f6e9",
+        "edge": "#ffd166",
+        "fog": 190
+      },
+      "breeze": 0,
+      "seed": 1003,
+      "targetSeconds": 20,
+      "pieces": [
+        {
+          "length": 100,
+          "drop": 33,
+          "width": 20,
+          "walls": true,
+          "turn": 75
+        },
+        {
+          "length": 20,
+          "turn": 20,
+          "drop": 7,
+          "width": 8,
+          "walls": true
+        },
+        {
+          "length": 20,
+          "drop": 6,
+          "width": 9,
+          "walls": true
+        }
+      ]
+    }
+  ]
+}

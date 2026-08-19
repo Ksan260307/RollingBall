@@ -51,6 +51,8 @@ export const RunState = {
   Ready: 0,
   /** Under way. */
   Rolling: 1,
+  /** Stopped getting anywhere for too long, so the run is over. */
+  Stuck: 2,
   /** Over the finish line. */
   Finished: 3,
 } as const;
@@ -103,6 +105,14 @@ const CATCH_DEPTH = Math.round(1.6 * ONE);
 const FALL_LIMIT = Math.round(6.0 * ONE);
 
 /**
+ * How far to the side of the floor the ball has to be before going over the
+ * edge counts as gone, rather than as leaning out over it.
+ *
+ * Measured from the edge, so the ball has to have cleared it entirely.
+ */
+const EDGE_CLEARANCE = Math.round(0.15 * ONE);
+
+/**
  * How long the ball is held at the start after a fall, in steps.
  *
  * Falling does not end a run: the ball is put back at the start and carries
@@ -110,6 +120,18 @@ const FALL_LIMIT = Math.round(6.0 * ONE);
  * of going over the edge.
  */
 const RECOVERY_HOLD = Math.round(0.7 * STEPS_PER_SECOND);
+
+/**
+ * How long the ball may get nowhere before the run is called off.
+ *
+ * A ball that is too knobbly, or wedged against a wall, or simply out of
+ * hill, will otherwise sit there for ever. Ten seconds of no progress ends
+ * it, and the player watches the count so they know what is happening.
+ */
+const STALL_LIMIT = 10 * STEPS_PER_SECOND;
+
+/** How much further along the course counts as actually getting somewhere. */
+const PROGRESS_STEP = Math.round(1.0 * ONE);
 
 /** How much bounce is left after landing. */
 const LANDING_BOUNCE = Math.round(0.26 * ONE);
@@ -121,13 +143,17 @@ const WALL_BOUNCE = Math.round(0.45 * ONE);
 const WALL_GRIP = Math.round(0.4 * ONE);
 
 /**
- * How tall the low walls stand, matching the height they are drawn at.
+ * How tall the railings stand, and how far up they can be hit.
  *
- * A wall only stops the ball while the ball is low enough to hit it. Without
- * this the walls would carry on invisibly into the sky, and a ball sailing
- * well above one would still be shoved back as though it had struck it.
+ * A railing only stops the ball while the ball is low enough to strike it.
+ * Without that the railings would carry on invisibly into the sky, and a
+ * ball sailing well above one would still be shoved back as though it had
+ * hit something.
+ *
+ * The drawing reads this same number, so what you can see and what you can
+ * hit are the same thing by construction and cannot drift apart.
  */
-const WALL_HEIGHT = Math.round(0.55 * ONE);
+export const WALL_HEIGHT = Math.round(0.9 * ONE);
 
 /** How much the air slows the ball, per unit of speed. */
 const AIR_RESISTANCE = Math.round(0.0062 * ONE);
@@ -146,6 +172,38 @@ const SPIN_LIMIT = Math.round(90 * ONE);
 
 /** A skid has to be this fast before it is worth telling anyone about. */
 const SKID_NOTICE = Math.round(1.4 * ONE);
+
+/**
+ * How evenly a ball has to be shaped before the bumps stop mattering.
+ *
+ * Below this the ball starts catching on its own corners; a properly round
+ * one sits comfortably above it.
+ */
+const EVEN_ENOUGH = Math.round(0.55 * ONE);
+
+/** The range over which a ball goes from catching badly to rolling cleanly. */
+const EVEN_RANGE = Math.round(0.4 * ONE);
+
+/**
+ * How much each lump standing proud of the body adds to the bumpiness.
+ *
+ * The unevenness of the outline already covers how far the worst lump
+ * sticks out. This covers how many there are, which is what decides how
+ * often the ball trips as it goes round.
+ */
+const PROUD_WEIGHT = Math.round(26 * ONE);
+
+/** How far the ball rolls between one bump landing and the next. */
+const BUMP_SPACING = Math.round(1.5 * ONE);
+
+/** How hard a bump throws the ball up, per unit of bumpiness and speed. */
+const BUMP_LIFT = Math.round(0.16 * ONE);
+
+/** How much speed each bump costs, as a share of the throw. */
+const BUMP_LOSS = Math.round(0.24 * ONE);
+
+/** Below this speed the ball rolls over its bumps rather than tripping on them. */
+const BUMP_FLOOR = Math.round(1.5 * ONE);
 
 /** How each kind of floor behaves. */
 interface FloorBehaviour {
@@ -200,27 +258,40 @@ export interface BallFeel {
   gripScale: number;
   /** How much this ball scrubs off while rolling, where ONE is normal. */
   dragScale: number;
+  /**
+   * How badly the ball catches on its own shape, from 0 for a properly round
+   * one up towards ONE for something spiky. This is what makes a lump on the
+   * side genuinely worse to roll rather than merely different.
+   */
+  bumpiness: number;
 }
 
 /** Turns a measured design into the numbers the physics uses. */
 export function ballFeelFrom(stats: ShapeStats): BallFeel {
-  // A lumpy ball meets the floor unevenly, so it holds on less well and
-  // scrubs off more speed. How quickly it gets going is not fiddled with
-  // here at all: that already falls out of where its cubes sit.
+  // How close to properly round the design is, stretched so that a ball worth
+  // calling round scores full marks and anything knobbly drops away quickly.
+  const evenness = clamp(div(stats.smoothness - EVEN_ENOUGH, EVEN_RANGE), 0, ONE);
+  const bumpiness = clamp(ONE - evenness + mul(PROUD_WEIGHT, stats.proudShare), 0, ONE);
+
+  // A lumpy ball meets the floor unevenly: it holds on less well, scrubs off
+  // more speed, and trips over its own corners as it goes. How quickly it
+  // gets going is not fiddled with here at all — that already falls out of
+  // where its cubes sit.
   return {
     radius: stats.radius,
     weight: stats.weight,
     smoothness: stats.smoothness,
     spinResistance: stats.spinResistance,
     gripShare: gripShare(stats.spinResistance),
-    gripScale: Math.round(0.72 * ONE) + mul(Math.round(0.28 * ONE), stats.smoothness),
-    dragScale: Math.round(1.35 * ONE) - mul(Math.round(0.35 * ONE), stats.smoothness),
+    gripScale: Math.round(0.4 * ONE) + mul(Math.round(0.6 * ONE), evenness),
+    dragScale: ONE + mul(Math.round(0.85 * ONE), bumpiness),
+    bumpiness,
   };
 }
 
 /** Something worth showing or hearing about, produced by a step. */
 export interface Moment {
-  kind: 'collect' | 'land' | 'wall' | 'skid' | 'finish' | 'fall';
+  kind: 'land' | 'wall' | 'skid' | 'finish' | 'fall' | 'stuck';
   player: number;
   x: number;
   y: number;
@@ -265,9 +336,6 @@ const SIDE_SPREAD = Math.round(5.0 * ONE);
 
 /** How far the members of one group spread around their group. */
 const MEMBER_SPREAD = Math.round(1.8 * ONE);
-
-/** How far past the edge of the floor a collectable light sits. */
-const ORB_OFFSET = Math.round(1.1 * ONE);
 
 /** Working space for the rolling maths, reused so nothing is thrown away. */
 const slipScratch: Triple = triple();
@@ -316,12 +384,17 @@ export class World {
   readonly grounded: Uint8Array;
   readonly topSpeed: Int32Array;
   readonly finishStep: Int32Array;
-  readonly collected: Int32Array;
   readonly elapsedSteps: Int32Array;
   /** How many times the ball has gone over the edge and been fetched back. */
   readonly falls: Int32Array;
   /** Steps left of the pause after a fall, while the ball is put back. */
   readonly recovering: Int32Array;
+  /** How far through the gap between one bump and the next the ball is. */
+  readonly bumpPhase: Int32Array;
+  /** Steps left before a ball that is getting nowhere ends the run. */
+  readonly stallCountdown: Int32Array;
+  /** The furthest the ball has been since it last made real progress. */
+  private readonly progressMark: Int32Array;
   private readonly hint: Int32Array;
 
   /** Things worth showing, refreshed every step. */
@@ -357,10 +430,12 @@ export class World {
     this.grounded = new Uint8Array(slots);
     this.topSpeed = new Int32Array(slots);
     this.finishStep = new Int32Array(slots).fill(-1);
-    this.collected = new Int32Array(slots);
     this.elapsedSteps = new Int32Array(slots);
     this.falls = new Int32Array(slots);
     this.recovering = new Int32Array(slots);
+    this.bumpPhase = new Int32Array(slots);
+    this.stallCountdown = new Int32Array(slots).fill(STALL_LIMIT);
+    this.progressMark = new Int32Array(slots);
     this.hint = new Int32Array(slots);
 
     const along = Math.max(8, Math.min(96, Math.round(this.course.totalLength / ONE / 2)));
@@ -398,16 +473,18 @@ export class World {
       this.travelled[p] = 0;
       this.topSpeed[p] = 0;
       this.finishStep[p] = -1;
-      this.collected[p] = 0;
       this.elapsedSteps[p] = 0;
       this.falls[p] = 0;
       this.recovering[p] = 0;
+      this.bumpPhase[p] = 0;
+      this.stallCountdown[p] = STALL_LIMIT;
+      this.progressMark[p] = 0;
     }
   }
 
   /**
    * Puts one ball back on the start line, still, and leaves everything else
-   * about the run alone: the clock, the lights collected, the scenery.
+   * about the run alone: the clock, the falls so far, the scenery.
    */
   private returnToStart(player: number): void {
     const c = this.course;
@@ -427,6 +504,11 @@ export class World {
     this.spinY[player] = 0;
     this.spinZ[player] = 0;
     this.hint[player] = 0;
+    this.bumpPhase[player] = 0;
+    // Going over the edge is a fresh attempt, not more of the same standing
+    // still, so the count starts again from the top.
+    this.stallCountdown[player] = STALL_LIMIT;
+    this.progressMark[player] = 0;
     this.travelled[player] = 0;
     this.sideways[player] = 0;
     this.sidewaysSpeed[player] = 0;
@@ -475,11 +557,10 @@ export class World {
       for (let n = 0; n < population; n++) {
         this.scenery.add(0, 0, 0, Kind.Orb, 0, 0, note.energy);
       }
-      // Give each region one collectable light and make the rest decoration.
       for (let n = 0; n < population; n++) {
         const slot = from + n;
         const looksRng = new Generator(mix(this.seed, slot, 0x0b1e));
-        this.scenery.setKind(slot, n === 0 ? Kind.Orb : 1 + looksRng.below(3));
+        this.scenery.setKind(slot, looksRng.below(4));
         this.scenery.setLooks(slot, looksRng.below(256));
       }
       const region: SceneryRegion = { from, count: population, note, awake: true, facing, pointIndex };
@@ -494,17 +575,6 @@ export class World {
    */
   private placeRegion(region: SceneryRegion): void {
     restoreGroup(this.scenery, region.from, region.count, region.note, this.seed, MEMBER_SPREAD);
-
-    // The collectable light is pulled in to just past the edge of the floor.
-    // It is close enough to pick up by riding the edge, and far enough out
-    // that it is never in the way of somebody taking the straight line.
-    const c = this.course;
-    const i = region.pointIndex;
-    const side = region.facing * (c.halfWidth[i] + ORB_OFFSET);
-    const slot = region.from;
-    this.scenery.x[slot] = c.x[i] + mul(c.rightX[i], side);
-    this.scenery.y[slot] = c.y[i] + mul(c.upY[i], Math.round(0.6 * ONE));
-    this.scenery.z[slot] = c.z[i] + mul(c.rightZ[i], side);
   }
 
   /** How many scenery pieces did a full update on the last step. */
@@ -567,6 +637,26 @@ export class World {
   /** Which point of the course the ball was last found beside. */
   hintFor(player = 0): number {
     return this.hint[player];
+  }
+
+  /** Seconds left before a ball that is getting nowhere ends the run. */
+  stallSecondsFor(player = 0): number {
+    return this.stallCountdown[player] / STEPS_PER_SECOND;
+  }
+
+  /** True once the ball has been getting nowhere long enough to say so. */
+  isStalling(player = 0): boolean {
+    return this.stallCountdown[player] < STALL_LIMIT - STEPS_PER_SECOND;
+  }
+
+  /** The progress marks, for taking a copy of the world. */
+  saveProgressMarks(): Int32Array {
+    return this.progressMark.slice();
+  }
+
+  /** Puts the progress marks back from a copy. */
+  loadProgressMarks(marks: Int32Array): void {
+    this.progressMark.set(marks);
   }
 
   /**
@@ -729,6 +819,7 @@ export class World {
       const hold = perStep(mul(mul(floor.grip, this.feel.gripScale), pressing));
       this.applyGrip(player, upX, upY, upZ, hold, true);
       this.applyRollingDrag(player, upX, upY, upZ, floor, pressing);
+      this.tripOverBumps(player, upX, upY, upZ, where.travelled);
     } else {
       // Off the ground the spin simply carries on.
       this.spinX[player] = mul(this.spinX[player], AIR_SPIN_KEEP);
@@ -743,7 +834,6 @@ export class World {
     this.z[player] += perStep(this.velocityZ[player]);
 
     this.settleAgainstWalls(player, (where.flags & PointFlag.Walls) !== 0);
-    this.gatherOrbs(player);
     this.judge(player);
   }
 
@@ -879,6 +969,47 @@ export class World {
     this.spinZ[player] += spinScratch.z;
   }
 
+  /**
+   * Lets a knobbly ball catch on its own corners.
+   *
+   * A ball that is not round does not roll on one steady radius: every so
+   * often a lump comes round to the bottom, hits the floor, throws the ball
+   * up a little and takes some speed with it. How often that happens depends
+   * on how far it has rolled, so it stays in step with what is drawn, and how
+   * hard depends on how uneven the ball is and how fast it is going.
+   *
+   * A properly round ball has no bumpiness at all, so this does nothing to it.
+   */
+  private tripOverBumps(
+    player: number,
+    upX: number,
+    upY: number,
+    upZ: number,
+    travelled: number,
+  ): void {
+    if (this.feel.bumpiness <= 0) return;
+    const speed = this.speedFor(player);
+    if (speed <= BUMP_FLOOR) return;
+
+    const spacing = Math.max(1, mul(this.feel.radius, BUMP_SPACING));
+    const phase = div(travelled, spacing);
+    const crossed = Math.floor(phase / ONE) !== Math.floor(this.bumpPhase[player] / ONE);
+    this.bumpPhase[player] = phase;
+    if (!crossed) return;
+
+    const jolt = mul(mul(BUMP_LIFT, this.feel.bumpiness), speed);
+    this.velocityX[player] += mul(upX, jolt);
+    this.velocityY[player] += mul(upY, jolt);
+    this.velocityZ[player] += mul(upZ, jolt);
+
+    // Hitting a corner costs speed as well as sending the ball up.
+    const loss = mul(jolt, BUMP_LOSS);
+    const drop = loss < speed ? loss : speed;
+    this.velocityX[player] -= div(mul(this.velocityX[player], drop), speed);
+    this.velocityY[player] -= div(mul(this.velocityY[player], drop), speed);
+    this.velocityZ[player] -= div(mul(this.velocityZ[player], drop), speed);
+  }
+
   /** Keeps travel and spin inside sensible limits. */
   private capSpeeds(player: number): void {
     const speed = this.speedFor(player);
@@ -943,34 +1074,6 @@ export class World {
     if (impact > Math.round(1.5 * ONE)) this.addMoment('wall', player, impact);
   }
 
-  private gatherOrbs(player: number): void {
-    // The lights sit just past the edge of the floor, so the reach has to be
-    // long enough to pick one up by riding the edge, and no longer.
-    const reach = this.feel.radius + Math.round(1.4 * ONE);
-    const reachSquared = reach * reach;
-    const bx = this.x[player];
-    const by = this.y[player];
-    const bz = this.z[player];
-    this.grid.forEachNear(bx, by, bz, reach, (index) => {
-      if (this.scenery.kindOf(index) !== Kind.Orb) return;
-      if (this.scenery.stageOf(index) === Stage.Sleeping) return;
-      const dx = bx - this.scenery.x[index];
-      const dy = by - this.scenery.y[index];
-      const dz = bz - this.scenery.z[index];
-      if (dx * dx + dy * dy + dz * dz > reachSquared) return;
-      this.scenery.setStage(index, Stage.Sleeping);
-      this.collected[player]++;
-      this.moments.push({
-        kind: 'collect',
-        player,
-        x: this.scenery.x[index],
-        y: this.scenery.y[index],
-        z: this.scenery.z[index],
-        strength: ONE,
-      });
-    });
-  }
-
   private judge(player: number): void {
     const c = this.course;
     const where = placeOnCourse(c, this.x[player], this.y[player], this.z[player], this.hint[player]);
@@ -993,7 +1096,15 @@ export class World {
         ? 1
         : 0;
 
-    if (where.height < -FALL_LIMIT) {
+    // Off the side of the floor entirely, and sinking below it. Waiting for
+    // the ball to drop a full six metres let it slip off a narrow stretch,
+    // dip below the edge and be picked up again where the floor widened out,
+    // which looked for all the world like falling off and getting away with it.
+    const clearOfEdge =
+      abs(where.sideways) > where.halfWidth + this.feel.radius + EDGE_CLEARANCE;
+    const sinking = where.height < 0;
+
+    if (where.height < -FALL_LIMIT || (clearOfEdge && sinking)) {
       // Over the edge. Note where it happened for the picture, then put the
       // ball back on the start line and let the run carry on.
       this.addMoment('fall', player, ONE);
@@ -1008,6 +1119,20 @@ export class World {
       this.state[player] = RunState.Finished;
       this.finishStep[player] = this.elapsedSteps[player];
       this.addMoment('finish', player, ONE);
+      return;
+    }
+
+    // Getting somewhere refills the count; standing still runs it down.
+    if (where.travelled > this.progressMark[player] + PROGRESS_STEP) {
+      this.progressMark[player] = where.travelled;
+      this.stallCountdown[player] = STALL_LIMIT;
+      return;
+    }
+    this.stallCountdown[player]--;
+    if (this.stallCountdown[player] <= 0) {
+      this.stallCountdown[player] = 0;
+      this.state[player] = RunState.Stuck;
+      this.addMoment('stuck', player, ONE);
     }
   }
 
@@ -1108,9 +1233,11 @@ export class World {
         .add(this.spinZ[p])
         .add(this.state[p])
         .add(this.elapsedSteps[p])
-        .add(this.collected[p])
         .add(this.falls[p])
-        .add(this.recovering[p]);
+        .add(this.recovering[p])
+        .add(this.bumpPhase[p])
+        .add(this.stallCountdown[p])
+        .add(this.progressMark[p]);
     }
     this.scenery.checksum(sum);
     this.surroundings.checksum(sum);
@@ -1135,10 +1262,12 @@ export interface Snapshot {
   travelled: Int32Array;
   topSpeed: Int32Array;
   finishStep: Int32Array;
-  collected: Int32Array;
   elapsedSteps: Int32Array;
   falls: Int32Array;
   recovering: Int32Array;
+  bumpPhase: Int32Array;
+  stallCountdown: Int32Array;
+  progressMark: Int32Array;
   scenery: EntityStore;
   surroundings: Surroundings;
   /** Which scenery groups were awake, and what their notes said. */
@@ -1167,10 +1296,12 @@ export function capture(world: World): Snapshot {
     travelled: world.travelled.slice(),
     topSpeed: world.topSpeed.slice(),
     finishStep: world.finishStep.slice(),
-    collected: world.collected.slice(),
     elapsedSteps: world.elapsedSteps.slice(),
     falls: world.falls.slice(),
     recovering: world.recovering.slice(),
+    bumpPhase: world.bumpPhase.slice(),
+    stallCountdown: world.stallCountdown.slice(),
+    progressMark: world.saveProgressMarks(),
     scenery,
     surroundings,
     attention: world.saveAttention(),
@@ -1198,10 +1329,12 @@ export function rewind(world: World, snapshot: Snapshot): void {
   world.travelled.set(snapshot.travelled);
   world.topSpeed.set(snapshot.topSpeed);
   world.finishStep.set(snapshot.finishStep);
-  world.collected.set(snapshot.collected);
   world.elapsedSteps.set(snapshot.elapsedSteps);
   world.falls.set(snapshot.falls);
   world.recovering.set(snapshot.recovering);
+  world.bumpPhase.set(snapshot.bumpPhase);
+  world.stallCountdown.set(snapshot.stallCountdown);
+  world.loadProgressMarks(snapshot.progressMark);
   snapshot.scenery.copyTo(world.scenery);
   snapshot.surroundings.copyTo(world.surroundings);
   world.loadAttention(snapshot.attention);

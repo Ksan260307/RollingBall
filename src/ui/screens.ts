@@ -32,9 +32,9 @@ export interface ScreenActions {
   onBackToTitle(): void;
   onRetry(): void;
   onNextStage(): void;
+  onWatchAgain(): void;
   onBackToStages(): void;
   onResume(): void;
-  onGiveUp(): void;
   onSettingsChange(settings: Settings): void;
   onClearRecords(): void;
 }
@@ -200,7 +200,7 @@ export class Screens {
           { class: 'panel-body' },
           button(TEXT.resume, () => this.actions.onResume(), 'primary'),
           button(TEXT.retry, () => this.actions.onRetry()),
-          button(TEXT.giveUp, () => this.actions.onGiveUp(), 'ghost'),
+          button(TEXT.backToTitle, () => this.actions.onBackToTitle(), 'ghost'),
         ),
       ),
     );
@@ -248,20 +248,27 @@ export class Screens {
   setResult(summary: RunSummary, stage: Stage, best: number | undefined, isBest: boolean): void {
     clear(this.resultBody);
     const hasNext = STAGES.findIndex((s) => s.id === stage.id) < STAGES.length - 1;
+    const won = summary.finished;
     this.resultBody.append(
       el(
         'div',
-        { class: 'panel panel-narrow is-win' },
-        el('header', { class: 'panel-head' }, el('h2', { text: TEXT.finished })),
+        { class: `panel panel-narrow ${won ? 'is-win' : 'is-lose'}` },
+        el(
+          'header',
+          { class: 'panel-head' },
+          el('h2', { text: won ? TEXT.finished : TEXT.stuckOver }),
+        ),
         el(
           'div',
           { class: 'panel-body' },
-          el(
-            'div',
-            { class: 'result-time' },
-            el('span', { class: 'result-time-label', text: TEXT.yourTime }),
-            el('span', { class: 'result-time-value', text: formatTime(summary.seconds) }),
-          ),
+          won
+            ? el(
+                'div',
+                { class: 'result-time' },
+                el('span', { class: 'result-time-label', text: TEXT.yourTime }),
+                el('span', { class: 'result-time-value', text: formatTime(summary.seconds) }),
+              )
+            : el('p', { class: 'note', text: TEXT.stuckOverHint }),
           isBest ? el('p', { class: 'best-flag', text: TEXT.newRecord }) : null,
           el(
             'dl',
@@ -270,8 +277,6 @@ export class Screens {
             el('dd', { text: formatSpeed(summary.topSpeed) }),
             el('dt', { text: TEXT.falls }),
             el('dd', { text: String(summary.falls) }),
-            el('dt', { text: TEXT.collectedItems }),
-            el('dd', { text: String(summary.collected) }),
             el('dt', { text: TEXT.bestTime }),
             el('dd', { text: best === undefined ? TEXT.noRecord : formatTime(best) }),
           ),
@@ -279,8 +284,10 @@ export class Screens {
             'div',
             { class: 'result-buttons' },
             button(TEXT.retry, () => this.actions.onRetry(), 'primary'),
-            hasNext ? button(TEXT.nextStage, () => this.actions.onNextStage()) : null,
+            won && hasNext ? button(TEXT.nextStage, () => this.actions.onNextStage()) : null,
+            button(TEXT.watchAgain, () => this.actions.onWatchAgain()),
             button(TEXT.backToStages, () => this.actions.onBackToStages(), 'ghost'),
+            button(TEXT.backToTitle, () => this.actions.onBackToTitle(), 'ghost'),
           ),
         ),
       ),

@@ -1,0 +1,318 @@
+/*
+ * The look of the course editor.
+ *
+ * This is a workshop tool, not part of the game, so it is plain and dense:
+ * everything about a course visible at once, nothing hidden behind menus.
+ */
+
+:root {
+  --ink: #eef2ff;
+  --ink-soft: #9aa6c4;
+  --panel: #161b2c;
+  --panel-high: #1e2439;
+  --edge: #2c3450;
+  --accent: #ffd166;
+  --good: #67e8a0;
+  --bad: #ff7b7b;
+  --font: 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Noto Sans JP', system-ui, sans-serif;
+  --mono: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #0d1120;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+}
+
+#app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.loading {
+  padding: 40px;
+  color: var(--ink-soft);
+}
+
+/* ------------------------------------------------------------------- bar */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--edge);
+}
+
+.bar h1 {
+  margin: 0 12px 0 0;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
+.bar .grow {
+  flex: 1;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ----------------------------------------------------------------- panes */
+
+.panes {
+  display: grid;
+  grid-template-columns: minmax(360px, 460px) 1fr;
+  min-height: 0;
+}
+
+.side {
+  overflow-y: auto;
+  border-right: 1px solid var(--edge);
+  background: var(--panel);
+  padding: 12px 14px 40px;
+}
+
+.view {
+  position: relative;
+  min-width: 0;
+  background: radial-gradient(80% 80% at 50% 25%, #2a3358, #0d1120);
+}
+
+.view canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+.view canvas:active {
+  cursor: grabbing;
+}
+
+.view-hint {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.readout {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(13, 17, 32, 0.82);
+  border: 1px solid var(--edge);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre;
+  min-width: 190px;
+}
+
+/* --------------------------------------------------------------- widgets */
+
+button {
+  appearance: none;
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel-high);
+  border: 1px solid var(--edge);
+  border-radius: 7px;
+  padding: 6px 11px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #46527a;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #241a00;
+  font-weight: 700;
+}
+
+button.on {
+  background: rgba(255, 209, 102, 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.tiny {
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
+button.danger:hover {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--ink);
+  background: #101527;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  padding: 5px 7px;
+  width: 100%;
+}
+
+input[type='color'] {
+  padding: 2px;
+  height: 30px;
+}
+
+input[type='checkbox'] {
+  width: auto;
+}
+
+label {
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+h2 {
+  margin: 18px 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+}
+
+h2:first-child {
+  margin-top: 0;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.grid6 {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+/* --------------------------------------------------------------- pieces */
+
+.pieces {
+  display: grid;
+  gap: 6px;
+}
+
+.piece {
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  background: var(--panel-high);
+  padding: 8px;
+  display: grid;
+  gap: 7px;
+}
+
+.piece.on {
+  border-color: var(--accent);
+}
+
+.piece-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.piece-no {
+  font-family: var(--mono);
+  color: var(--ink-soft);
+  min-width: 22px;
+}
+
+.piece-at {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+  flex: 1;
+}
+
+.piece-fields {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.piece-flags {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.piece-flags label {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
+
+.note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.note.good {
+  color: var(--good);
+}
+
+.note.bad {
+  color: var(--bad);
+}
+
+@media (max-width: 900px) {
+  .panes {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 45vh;
+  }
+
+  .side {
+    border-right: none;
+    border-bottom: 1px solid var(--edge);
+  }
+}

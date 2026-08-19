@@ -84,10 +84,11 @@ describe('the words on screen', () => {
     }
   });
 
-  it('gives every course a name and a description a child could read', () => {
+  it('gives every course a name a child could read', () => {
+    // The description is optional: a course made in the editor may not have
+    // one yet, and an empty line should not stop the game listing it.
     for (const stage of STAGES) {
       expect(stage.name.trim().length).toBeGreaterThan(1);
-      expect(stage.blurb.trim().length).toBeGreaterThan(5);
     }
   });
 });
@@ -200,7 +201,6 @@ describe('the screens', () => {
         seconds: 18.25,
         metres: 102,
         topSpeed: 12.5,
-        collected: 4,
         falls: 2,
         finished: true,
         checksum: 1,
@@ -215,6 +215,7 @@ describe('the screens', () => {
     expect(text).toContain(TEXT.newRecord);
     expect(text).toContain('45 km/h');
     expect(text).toContain(TEXT.falls);
+    expect(text).toContain(TEXT.backToTitle);
   });
 
   it('leaves the new-best flag off when the time was not a best', () => {
@@ -225,7 +226,6 @@ describe('the screens', () => {
         seconds: 26,
         metres: 110,
         topSpeed: 9,
-        collected: 0,
         falls: 0,
         finished: true,
         checksum: 1,
@@ -239,19 +239,18 @@ describe('the screens', () => {
     expect(text).not.toContain(TEXT.newRecord);
   });
 
-  it('offers the next course only when there is one and it was cleared', () => {
+  it('offers the next course only when there is one after it', () => {
     const screens = makeScreens();
     const summary = {
-      stageId: 'skyway',
+      stageId: STAGES[STAGES.length - 1].id,
       seconds: 20,
       metres: 110,
       topSpeed: 12,
-      collected: 1,
       falls: 0,
       finished: true,
       checksum: 1,
     };
-    screens.setResult(summary, STAGES[2], 20, false);
+    screens.setResult(summary, STAGES[STAGES.length - 1], 20, false);
     expect(screens.root.textContent).not.toContain(TEXT.nextStage);
     screens.setResult({ ...summary, stageId: 'meadow' }, STAGES[0], 20, false);
     expect(screens.root.textContent).toContain(TEXT.nextStage);
@@ -259,7 +258,7 @@ describe('the screens', () => {
 });
 
 describe('the readout during a run', () => {
-  it('shows the clock, the speed and how far there is to go', () => {
+  it('shows the clock and the speed, and nothing else in the way', () => {
     const hud = new Hud();
     const stage = STAGES[0];
     const session = new Session({
@@ -272,8 +271,10 @@ describe('the readout during a run', () => {
     hud.update(session);
     expect(hud.root.querySelector('.hud-time')?.textContent).not.toBe('0:00.00');
     expect(hud.root.querySelector('.hud-speed')?.textContent).toMatch(/km\/h$/);
-    const width = (hud.root.querySelector('.hud-progress-fill') as HTMLElement).style.width;
-    expect(width.endsWith('%')).toBe(true);
+    // The bars across the top were taking the eye off the ball, so they went.
+    expect(hud.root.querySelector('.hud-progress')).toBeNull();
+    expect(hud.root.querySelector('.hud-mood')).toBeNull();
+    expect(hud.root.querySelector('.hud-lights')).toBeNull();
   });
 
   it('shows the best time, or says there is not one yet', () => {

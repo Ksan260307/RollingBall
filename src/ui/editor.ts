@@ -41,8 +41,10 @@ import {
   largestConnectedPart,
   measureShape,
   pebbleShape,
+  randomShape,
 } from '../core/ballShape';
 import { ONE } from '../core/fixed';
+import { ballFeelFrom } from '../core/simulation';
 import { BallDesign } from '../game/storage';
 import { FaceInfo, buildBallGeometry, loadImage, makeBallMaterial, makePhotoTexture } from '../render/ballMesh';
 import { button, clear, el, slider } from './dom';
@@ -92,6 +94,8 @@ export class BallEditor {
   /** The last cube this gesture changed, so a drag does not redo the same one. */
   private lastTouched = -1;
   private changesThisGesture = 0;
+  /** Keeps every press of the random button giving a different shape. */
+  private seedCounter = 0;
 
   private spinX = 0.5;
   private spinY = 0.6;
@@ -165,6 +169,7 @@ export class BallEditor {
               button(TEXT.presetRound, () => this.usePreset(defaultShape(this.colour))),
               button(TEXT.presetCube, () => this.usePreset(cubeShape(this.colour))),
               button(TEXT.presetPebble, () => this.usePreset(pebbleShape(this.colour))),
+              button(TEXT.presetRandom, () => this.usePreset(randomShape(this.nextSeed(), this.colour))),
             ),
             el(
               'div',
@@ -217,15 +222,33 @@ export class BallEditor {
     }
   }
 
+  /**
+   * The colours, laid out as a proper palette rather than one long line.
+   *
+   * Each row holds the same nine hues at a different strength — bright,
+   * deep, then soft — so the row you are on tells you the mood and the
+   * column tells you the colour. The last row is the odds and ends that do
+   * not belong to any of the nine.
+   */
   private buildPalette(): void {
     clear(this.paletteRow);
     for (let i = 1; i < PALETTE.length; i++) {
+      const chosen = this.colour === i;
       const swatch = el('button', {
-        class: `swatch${this.colour === i ? ' is-active' : ''}`,
-        attrs: { type: 'button', style: `background:${PALETTE[i]}`, 'aria-label': `${TEXT.colour} ${i}` },
+        class: `swatch${chosen ? ' is-active' : ''}`,
+        attrs: {
+          type: 'button',
+          style: `background:${PALETTE[i]}`,
+          'aria-label': `${TEXT.colour} ${i}`,
+          'aria-pressed': chosen ? 'true' : 'false',
+          title: PALETTE[i],
+        },
         on: {
           click: () => {
             this.colour = i;
+            // Picking a colour means you want to paint with it.
+            this.tool = 'paint';
+            this.buildTools();
             this.buildPalette();
             this.refreshReadout();
           },
@@ -381,11 +404,15 @@ export class BallEditor {
     // the rules actually work out from where the cubes sit. Weight gathered
     // near the middle spins up faster than weight out at the rim.
     const pickup = ONE / (1 + stats.spinResistance / ONE);
+    // How badly the shape catches on itself is what the rules actually use,
+    // so it is shown rather than left for the player to discover on a course.
+    const bumpiness = ballFeelFrom(stats).bumpiness;
     const rows: [string, string][] = [
       [TEXT.ballSize, `${Math.round((stats.radius / ONE) * 200)} cm`],
       [TEXT.ballWeight, `${Math.round((stats.weight / ONE) * 100)} %`],
       [TEXT.ballRoundness, `${Math.round((stats.smoothness / ONE) * 100)} %`],
       [TEXT.ballPickup, `${Math.round((pickup / ONE) * 100)} %`],
+      [TEXT.ballBumpiness, `${Math.round((bumpiness / ONE) * 100)} %`],
       [TEXT.ballBlocks, String(stats.cubes)],
     ];
     for (const [label, value] of rows) {
@@ -405,6 +432,12 @@ export class BallEditor {
     if (!message) return;
     this.noticeRow.append(el('p', { class: 'note', text: message }));
     window.setTimeout(() => clear(this.noticeRow), 3200);
+  }
+
+  /** A fresh number each time, so the random shape is never the same twice. */
+  private nextSeed(): number {
+    this.seedCounter = (this.seedCounter + 1) | 0;
+    return (Date.now() + this.seedCounter * 2654435761) >>> 0;
   }
 
   private usePreset(voxels: Uint8Array): void {

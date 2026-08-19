@@ -11,7 +11,8 @@ import './ui/styles.css';
 import { ONE } from './core/fixed';
 import { measureShape } from './core/ballShape';
 import { unpackControls } from './core/input';
-import { Session } from './game/session';
+import { Session, type SessionOptions } from './game/session';
+import { Playback } from './game/playback';
 import { demoControls } from './game/demoDriver';
 import { STAGES, Stage, courseFor } from './game/stages';
 import {
@@ -25,6 +26,7 @@ import {
   saveRecord,
   saveSettings,
 } from './game/storage';
+import { Sounds } from './audio/sound';
 import { GameView } from './render/view';
 import { ControlReader } from './ui/controls';
 import { BallEditor } from './ui/editor';
@@ -33,7 +35,10 @@ import { Screens, ScreenName } from './ui/screens';
 import { button, el } from './ui/dom';
 import { TEXT } from './ui/text';
 
-type Mode = 'menu' | 'playing' | 'paused' | 'result' | 'editor';
+type Mode = 'menu' | 'playing' | 'paused' | 'result' | 'editor' | 'replay';
+
+/** How long a replay holds on the finish before starting over. */
+const REPLAY_ENDING = 1.3;
 
 function main(): void {
   const app = document.getElementById('app');
@@ -55,13 +60,46 @@ function main(): void {
   let design: BallDesign = loadBall();
   let mode: Mode = 'menu';
   let session: Session | null = null;
+  /** True while the finish is being shown, before the results panel. */
+  let celebrating = false;
   let currentStage: Stage = STAGES[0];
   let demo: Session | null = null;
+  /** The run being watched back, and what it takes to build it again. */
+  let playback: Playback | null = null;
+  let lastRun: {
+    options: SessionOptions;
+    controls: number[];
+    finished: boolean;
+  } | null = null;
+  /** Seconds to hold on the end of a replay before it comes round again. */
+  let replayHold = 0;
 
   const controls = new ControlReader(canvas);
   controls.invertPush = settings.invertPush;
 
+  // Browsers stay silent until the player has touched the page, so the sound
+  // waits for the first tap or key rather than trying and failing.
+  const sounds = new Sounds();
+  sounds.setEnabled(settings.sound);
+  const wakeSound = (): void => sounds.wake();
+  window.addEventListener('pointerdown', wakeSound, { passive: true });
+  window.addEventListener('keydown', wakeSound);
+
   const hud = new Hud();
+  hud.onStallTick = (left) => sounds.stallTick(left);
+  hud.onCountIn = () => sounds.countIn();
+  hud.onGo = () => {
+    sounds.goSignal();
+    hud.fireFlash();
+    hud.showBanner(TEXT.countdownGo);
+    if (session) {
+      // A ring of sparks around the ball as it is let go.
+      const world = session.world;
+      for (let n = 0; n < 3; n++) {
+        view.burst(world.x[0] / ONE, world.y[0] / ONE + 0.3, world.z[0] / ONE, currentStage.mood.edge, 5);
+      }
+    }
+  };
   const editor = new BallEditor(design);
 
   const screens = new Screens(
@@ -74,7 +112,11 @@ function main(): void {
       onHowTo: () => show('howto'),
       onSettings: () => show('settings'),
       onChooseStage: (stage) => startRun(stage),
-      onBackToTitle: () => show('title'),
+      onBackToTitle: () => {
+        session = null;
+        show('title');
+        startDemo();
+      },
       onRetry: () => {
         if (session) {
           session.restart();
@@ -82,6 +124,7 @@ function main(): void {
           beginPlaying();
         }
       },
+      onWatchAgain: () => startReplay(),
       onNextStage: () => {
         const index = STAGES.findIndex((s) => s.id === currentStage.id);
         startRun(STAGES[Math.min(STAGES.length - 1, index + 1)]);
@@ -93,15 +136,11 @@ function main(): void {
         startDemo();
       },
       onResume: () => beginPlaying(),
-      onGiveUp: () => {
-        session = null;
-        screens.setStages(records);
-        show('stages');
-        startDemo();
-      },
+
       onSettingsChange: (next) => {
         settings = next;
         controls.invertPush = settings.invertPush;
+        sounds.setEnabled(settings.sound);
         view.zoom = settings.zoom;
         view.richGraphics = settings.richGraphics;
         saveSettings(settings);
@@ -126,7 +165,33 @@ function main(): void {
     button('II', () => pause(), 'round'),
   );
 
-  const ui = el('div', { class: 'ui' }, screens.root, hud.root, tools, editor.root);
+  // The controls that sit over a replay: where from, how fast, and out.
+  const replayClock = el('span', { class: 'replay-clock', text: '0.00' });
+  const speedButton = button('×1', () => {
+    if (!playback) return;
+    const speed = playback.nextSpeed();
+    speedButton.textContent = `×${speed}`;
+  });
+  const replayBar = el(
+    'div',
+    { class: 'replay-bar is-hidden' },
+    el(
+      'span',
+      { class: 'replay-head' },
+      el('span', { class: 'replay-label', text: TEXT.replayTitle }),
+      replayClock,
+    ),
+    button(TEXT.replayAngle, () => playback?.nextAngle()),
+    speedButton,
+    button(TEXT.replayFromTop, () => {
+      view.clearBreakthrough();
+      replayHold = 0;
+      playback?.restart();
+    }),
+    button(TEXT.close, () => endReplay(), 'ghost'),
+  );
+
+  const ui = el('div', { class: 'ui' }, screens.root, hud.root, tools, replayBar, editor.root);
   app.append(ui);
 
   view.zoom = settings.zoom;
@@ -157,6 +222,7 @@ function main(): void {
   });
 
   function show(name: ScreenName): void {
+    sounds.click();
     screens.show(name);
     const playing = name === 'none';
     hud.setVisible(playing);
@@ -186,6 +252,10 @@ function main(): void {
 
   function startRun(stage: Stage): void {
     currentStage = stage;
+    playback = null;
+    replayBar.classList.add('is-hidden');
+    view.clearBreakthrough();
+    view.cameraStyle = 'chase';
     const course = courseFor(stage);
     view.setStage(stage, course);
     session = new Session({
@@ -201,6 +271,43 @@ function main(): void {
     beginPlaying();
   }
 
+  /**
+   * Watches the run that was just made, from wherever the camera fancies.
+   *
+   * The run is stored as the player's inputs alone, so this is the same
+   * attempt over again rather than a recording of it.
+   */
+  function startReplay(): void {
+    if (!lastRun || lastRun.controls.length === 0) return;
+    sounds.quieten();
+    view.clearBreakthrough();
+    view.setStage(currentStage, lastRun.options.course);
+    playback = new Playback(lastRun.options, lastRun.controls);
+    replayHold = 0;
+    view.prepareScenery(playback.session.world);
+    speedButton.textContent = '×1';
+    mode = 'replay';
+    screens.show('none');
+    hud.setVisible(false);
+    tools.classList.add('is-hidden');
+    controls.enabled = false;
+    replayBar.classList.remove('is-hidden');
+  }
+
+  /** Back to the results, with the replay put away. */
+  function endReplay(): void {
+    playback = null;
+    view.clearBreakthrough();
+    // A ball that went through the finish is long gone, so it should not be
+    // back on the line spinning away behind the results panel.
+    if (lastRun?.finished) view.setBallVisible(false);
+    view.cameraStyle = 'chase';
+    replayBar.classList.add('is-hidden');
+    sounds.quieten();
+    mode = 'result';
+    show('result');
+  }
+
   function beginPlaying(): void {
     if (!session) return;
     session.paused = false;
@@ -210,6 +317,7 @@ function main(): void {
 
   function pause(): void {
     if (mode !== 'playing' || !session) return;
+    sounds.quieten();
     session.paused = true;
     mode = 'paused';
     show('pause');
@@ -217,6 +325,11 @@ function main(): void {
 
   /** Rolls a ball down the first course behind the menus. */
   function startDemo(): void {
+    sounds.quieten();
+    playback = null;
+    replayBar.classList.add('is-hidden');
+    view.clearBreakthrough();
+    view.cameraStyle = 'chase';
     const stage = STAGES[0];
     view.setStage(stage, courseFor(stage));
     demo = new Session({
@@ -229,14 +342,54 @@ function main(): void {
     session = null;
   }
 
+  /**
+   * Marks the end of a run, then shows the results a moment later.
+   *
+   * The pause matters: crossing the line is the thing the player has been
+   * working towards, and covering it instantly with a panel throws it away.
+   */
   function finishRun(): void {
-    if (!session) return;
+    if (!session || celebrating) return;
     const summary = session.summary();
-    const isBest = summary.finished && saveRecord(currentStage.id, summary.seconds);
+    const world = session.world;
+    const won = summary.finished;
+
+    // Keep the attempt so it can be watched back from the results screen.
+    lastRun = {
+      options: {
+        stage: currentStage,
+        course: courseFor(currentStage),
+        ball: measureShape(design.voxels),
+      },
+      controls: session.replay(),
+      finished: won,
+    };
+
+    if (won) {
+      hud.fireFlash();
+      hud.showBanner(TEXT.finished);
+      sounds.quieten();
+      // Straight on through the finish and away over the far side.
+      view.startBreakthrough(world);
+      // Confetti out of the ball, in the colours of the course.
+      const colours = [currentStage.mood.edge, currentStage.mood.sky, '#ffffff', '#67e8a0'];
+      for (const colour of colours) {
+        view.burst(world.x[0] / ONE, world.y[0] / ONE + 0.5, world.z[0] / ONE, colour, 8);
+      }
+    } else {
+      hud.showBanner(TEXT.stuckOver, '#ff7b7b');
+      sounds.quieten();
+    }
+
+    celebrating = true;
+    const isBest = won && saveRecord(currentStage.id, summary.seconds);
     if (isBest) records = loadRecords();
-    screens.setResult(summary, currentStage, records[currentStage.id], isBest);
-    mode = 'result';
-    show('result');
+    window.setTimeout(() => {
+      celebrating = false;
+      screens.setResult(summary, currentStage, records[currentStage.id], isBest);
+      mode = 'result';
+      show('result');
+    }, won ? 1600 : 1100);
   }
 
   window.addEventListener('resize', () => {
@@ -263,23 +416,65 @@ function main(): void {
     lastTime = now;
     sceneTime += delta;
 
+    if (mode === 'replay' && playback) {
+      const played = playback.advance(delta);
+      view.cameraStyle = playback.angle;
+      if (played > 0) {
+        // Sitting on the ending replays no steps, so the finish is heard
+        // once as it is crossed rather than on every frame afterwards.
+        sounds.playMoments(playback.session.world.moments);
+        sounds.followBall(playback.session.world);
+      } else {
+        sounds.quieten();
+      }
+      replayClock.textContent = playback.seconds.toFixed(2);
+      view.render(
+        playback.session.world,
+        playback.session.alpha,
+        playback.session.previous,
+        delta,
+        sceneTime,
+      );
+      // Show the ball go through the finish, then come round again while it
+      // is still worth watching. Waiting for it to disappear into the
+      // distance is a long time to sit looking at an empty course.
+      if (playback.finished) {
+        if (replayHold <= 0) {
+          if (playback.session.outcome === 'finished') {
+            view.startBreakthrough(playback.session.world);
+          }
+          replayHold = REPLAY_ENDING;
+        }
+        replayHold -= delta;
+        if (replayHold <= 0) {
+          view.clearBreakthrough();
+          playback.restart();
+          replayHold = 0;
+        }
+      }
+      requestAnimationFrame(frame);
+      return;
+    }
+
     if (mode !== 'editor') {
       const active = session ?? demo;
       if (active) {
         if (active === session && mode === 'playing') {
           active.update(delta, controls.read());
           hud.update(active);
+          sounds.playMoments(active.world.moments);
+          sounds.followBall(active.world);
           for (const moment of active.world.moments) {
             const mx = moment.x / ONE;
             const my = moment.y / ONE;
             const mz = moment.z / ONE;
-            if (moment.kind === 'collect') {
-              view.burst(mx, my, mz, currentStage.mood.edge);
-            } else if (moment.kind === 'skid') {
+            if (moment.kind === 'skid') {
               // A puff of dust where the ball is sliding rather than rolling.
               view.burst(mx, my - 0.3, mz, '#d5dbe8', 2);
             } else if (moment.kind === 'land') {
               view.burst(mx, my - 0.2, mz, '#ffffff', 3);
+            } else if (moment.kind === 'fall') {
+              view.burst(mx, my, mz, '#ff7b7b', 6);
             }
           }
           if (!active.running) finishRun();

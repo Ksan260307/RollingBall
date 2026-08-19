@@ -273,7 +273,8 @@ describe('the controls only send the ball one way', () => {
     const fullBrake = packControls({ steer: 0, push: -ONE, buttons: 0 });
 
     let leastTravelled = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < STEPS_PER_SECOND * 20; i++) {
+    // Held for a few seconds, well inside the count that ends a stalled run.
+    for (let i = 0; i < STEPS_PER_SECOND * 5; i++) {
       world.advance([fullBrake]);
       leastTravelled = Math.min(leastTravelled, world.travelled[0]);
       // Never driven back out through the start line.
@@ -300,6 +301,165 @@ describe('the controls only send the ball one way', () => {
     // One step in, it is comfortably on the floor rather than over the edge.
     expect(world.grounded[0]).toBe(1);
     expect(toNumber(world.travelled[0])).toBeGreaterThan(0.5);
+  });
+});
+
+describe('going over the edge', () => {
+  it('sends the ball back as soon as it has cleared the edge and started to sink', () => {
+    // Waiting for a full six-metre drop used to let the ball slip off a
+    // narrow stretch, dip below the edge, and get picked up again where the
+    // floor widened out. From the seat it looked like falling off and
+    // getting away with it.
+    const world = new World({
+      course: buildCourse([{ length: 80, drop: 8, width: 5 }]),
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    const hardRight = packControls({ steer: ONE, push: 0, buttons: 0 });
+
+    let steps = 0;
+    let deepestBeforeFall = 0;
+    while (world.falls[0] === 0 && steps < STEPS_PER_SECOND * 30) {
+      world.advance([hardRight]);
+      deepestBeforeFall = Math.min(deepestBeforeFall, toNumber(world.aboveFloor[0]));
+      steps++;
+    }
+    expect(world.falls[0]).toBe(1);
+    // Caught quickly, rather than after a long plunge.
+    expect(deepestBeforeFall).toBeGreaterThan(-3);
+  });
+
+  it('lets the ball lean out over the edge without punishing it', () => {
+    // Hanging over the lip with most of the ball still on the floor is part
+    // of taking a corner well, not a fall.
+    const world = new World({
+      course: buildCourse([{ length: 80, drop: 6, width: 9, walls: true }]),
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    for (let i = 0; i < STEPS_PER_SECOND * 8; i++) {
+      world.advance([packControls({ steer: ONE, push: 0, buttons: 0 })]);
+    }
+    // The walls hold it, so leaning hard never becomes a fall.
+    expect(world.falls[0]).toBe(0);
+    expect(world.state[0]).toBe(RunState.Rolling);
+  });
+
+  it('still lets the ball fly a gap without being called a fall', () => {
+    const world = new World({
+      course: buildCourse([
+        { length: 30, drop: 8, width: 9, walls: true },
+        { length: 4, drop: 13, width: 9, gap: true },
+        { length: 40, drop: 7, width: 9, walls: true },
+      ]),
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    let steps = 0;
+    while (world.state[0] === RunState.Rolling && steps < STEPS_PER_SECOND * 40) {
+      world.advance([NEUTRAL]);
+      steps++;
+    }
+    // Over the hole and away, with nothing counted against it.
+    expect(world.falls[0]).toBe(0);
+    expect(world.state[0]).toBe(RunState.Finished);
+  });
+});
+
+describe('a ball that stops getting anywhere', () => {
+  const fullBrake = packControls({ steer: 0, push: -ONE, buttons: 0 });
+
+  function stuckWorld(): World {
+    return new World({
+      course: buildCourse([{ length: 60, drop: 8, width: 10, walls: true }]),
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+  }
+
+  it('is given ten seconds before the run is called off', () => {
+    const world = stuckWorld();
+    // Hold the brake so the ball parks itself and goes nowhere.
+    for (let i = 0; i < STEPS_PER_SECOND * 3; i++) world.advance([fullBrake]);
+    expect(world.state[0]).toBe(RunState.Rolling);
+
+    let steps = 0;
+    while (world.state[0] === RunState.Rolling && steps < STEPS_PER_SECOND * 40) {
+      world.advance([fullBrake]);
+      steps++;
+    }
+    expect(world.state[0]).toBe(RunState.Stuck);
+    // Roughly ten seconds from the moment it stopped getting anywhere.
+    expect(steps / STEPS_PER_SECOND).toBeGreaterThan(6);
+    expect(steps / STEPS_PER_SECOND).toBeLessThan(14);
+  });
+
+  it('counts down where the player can see it', () => {
+    const world = stuckWorld();
+    expect(world.isStalling(0)).toBe(false);
+    expect(world.stallSecondsFor(0)).toBeCloseTo(10, 1);
+
+    for (let i = 0; i < STEPS_PER_SECOND * 6; i++) world.advance([fullBrake]);
+    expect(world.isStalling(0)).toBe(true);
+    expect(world.stallSecondsFor(0)).toBeLessThan(10);
+    expect(world.stallSecondsFor(0)).toBeGreaterThan(0);
+  });
+
+  it('never counts down while the ball is still getting somewhere', () => {
+    const world = stuckWorld();
+    for (let i = 0; i < STEPS_PER_SECOND * 20; i++) {
+      world.advance([NEUTRAL]);
+      if (world.state[0] !== RunState.Rolling) break;
+    }
+    // A plain roll down a long hill must never be mistaken for being stuck.
+    expect(world.state[0]).not.toBe(RunState.Stuck);
+    expect(world.isStalling(0)).toBe(false);
+  });
+
+  it('gives a fresh count after going over the edge', () => {
+    const world = new World({
+      course: buildCourse([{ length: 60, drop: 8, width: 3 }]),
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+    const hardRight = packControls({ steer: ONE, push: 0, buttons: 0 });
+    let steps = 0;
+    while (world.falls[0] === 0 && steps < STEPS_PER_SECOND * 30) {
+      world.advance([hardRight]);
+      steps++;
+    }
+    expect(world.falls[0]).toBe(1);
+    // Falling is another go, not more of the same standing still.
+    expect(world.stallSecondsFor(0)).toBeCloseTo(10, 1);
+    expect(world.isStalling(0)).toBe(false);
+  });
+
+  it('says so, so the picture can react', () => {
+    const world = stuckWorld();
+    let told = false;
+    for (let i = 0; i < STEPS_PER_SECOND * 25 && !told; i++) {
+      world.advance([fullBrake]);
+      told = world.moments.some((moment) => moment.kind === 'stuck');
+    }
+    expect(told).toBe(true);
+    expect(world.state[0]).toBe(RunState.Stuck);
+  });
+
+  it('stays exactly repeatable', () => {
+    const a = stuckWorld();
+    const b = stuckWorld();
+    for (let i = 0; i < STEPS_PER_SECOND * 15; i++) {
+      a.advance([fullBrake]);
+      b.advance([fullBrake]);
+    }
+    expect(b.state[0]).toBe(a.state[0]);
+    expect(b.stallCountdown[0]).toBe(a.stallCountdown[0]);
+    expect(b.checksum()).toBe(a.checksum());
   });
 });
 

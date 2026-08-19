@@ -11,6 +11,7 @@
  */
 
 import { ONE, clamp, div, mul, sqrt } from './fixed';
+import { Generator, mix } from './random';
 
 /**
  * Cubes per side of the editing space.
@@ -34,9 +35,17 @@ export const SHAPE_CENTRE = (SHAPE_SIZE - 1) / 2;
 /** How wide one cube is, in metres, at the standard ball size. */
 export const CUBE_METRES = 0.05;
 
-/** Colours a cube can be painted. Slot 0 means "no cube here". */
+/**
+ * Colours a cube can be painted. Slot 0 means "no cube here".
+ *
+ * The first nine are the colours the game shipped with, and they stay where
+ * they are: a design saved before the palette grew keeps exactly the colours
+ * it was built in. Everything after them is new, laid out as rows of a hue
+ * so the workshop can show it as a proper palette.
+ */
 export const PALETTE = [
   '#000000',
+  // The original nine.
   '#ff5b6e',
   '#ffb03a',
   '#ffe45e',
@@ -46,7 +55,35 @@ export const PALETTE = [
   '#ff8fd0',
   '#f5f5f5',
   '#3a3f52',
+  // Deeper shades of the same hues.
+  '#c62839',
+  '#d97706',
+  '#c9a227',
+  '#2f9e5c',
+  '#1976a8',
+  '#5b3fbf',
+  '#c2508f',
+  '#9aa4bf',
+  '#12162a',
+  // Softer shades, for anything that wants to look gentle.
+  '#ffb3bb',
+  '#ffd9a8',
+  '#fff4b8',
+  '#b7ecc3',
+  '#a9e2fb',
+  '#cfc4ff',
+  '#ffd0e8',
+  '#ffffff',
+  '#6b7392',
+  // A few that are hard to reach by mixing the rest.
+  '#00c2a8',
+  '#7cd44b',
+  '#ff6a00',
+  '#8b5a2b',
 ];
+
+/** How many swatches sit on one row of the workshop's palette. */
+export const PALETTE_ROW = 9;
 
 /** Half a cube, in stored metres; distances are measured in half-cube steps. */
 const HALF_CUBE = Math.round((CUBE_METRES / 2) * ONE);
@@ -121,7 +158,10 @@ function paintPattern(voxels: Uint8Array, colour: number): void {
 /** The ball everybody starts with: as round as the cubes allow. */
 export function defaultShape(colour = 5): Uint8Array {
   const voxels = new Uint8Array(SHAPE_CELLS);
-  const limit = 8.7 * 8.7;
+  // Stops short of the edge of the editing space on purpose, so that there is
+  // somewhere to stick a lump on. Filling the space to the brim would leave
+  // the "add" tool with nowhere to put anything.
+  const limit = 7.6 * 7.6;
   for (let x = 0; x < SHAPE_SIZE; x++) {
     for (let y = 0; y < SHAPE_SIZE; y++) {
       for (let z = 0; z < SHAPE_SIZE; z++) {
@@ -172,6 +212,394 @@ export function pebbleShape(colour = 4): Uint8Array {
   return voxels;
 }
 
+/** How many cubes a design uses. */
+function countFilled(voxels: Uint8Array): number {
+  let used = 0;
+  for (let i = 0; i < voxels.length; i++) if (voxels[i] !== 0) used++;
+  return used;
+}
+
+/** The kinds of chaotic ball the workshop can throw together. */
+const RANDOM_STYLES = 10;
+
+/** A whole number from the generator, as a decimal between -1 and 1. */
+function spread(rng: Generator): number {
+  return rng.signedUnit() / ONE;
+}
+
+/** A whole number from the generator, as a decimal between 0 and 1. */
+function unit(rng: Generator): number {
+  return rng.unit() / ONE;
+}
+
+/** Fills or clears a ball of cubes centred anywhere in the space. */
+function blob(
+  voxels: Uint8Array,
+  cx: number,
+  cy: number,
+  cz: number,
+  size: number,
+  paint: number,
+): void {
+  const limit = size * size;
+  const from = Math.max(0, Math.floor(Math.min(cx, cy, cz) - size));
+  const to = Math.min(SHAPE_SIZE - 1, Math.ceil(Math.max(cx, cy, cz) + size));
+  for (let x = from; x <= to; x++) {
+    for (let y = from; y <= to; y++) {
+      for (let z = from; z <= to; z++) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const dz = z - cz;
+        if (dx * dx + dy * dy + dz * dz <= limit) voxels[cellIndex(x, y, z)] = paint;
+      }
+    }
+  }
+}
+
+/** Fills or clears a box of cubes. */
+function slab(
+  voxels: Uint8Array,
+  cx: number,
+  cy: number,
+  cz: number,
+  halfX: number,
+  halfY: number,
+  halfZ: number,
+  paint: number,
+): void {
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    if (Math.abs(x - cx) > halfX) continue;
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      if (Math.abs(y - cy) > halfY) continue;
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        if (Math.abs(z - cz) > halfZ) continue;
+        voxels[cellIndex(x, y, z)] = paint;
+      }
+    }
+  }
+}
+
+/** Runs a line of cubes out from a point, for spikes and arms. */
+function prong(
+  voxels: Uint8Array,
+  fromX: number,
+  fromY: number,
+  fromZ: number,
+  stepX: number,
+  stepY: number,
+  stepZ: number,
+  length: number,
+  thickness: number,
+  paint: number,
+): void {
+  for (let step = 0; step < length; step++) {
+    const x = fromX + stepX * step;
+    const y = fromY + stepY * step;
+    const z = fromZ + stepZ * step;
+    if (!insideShape(Math.round(x), Math.round(y), Math.round(z))) break;
+    // Tapers as it goes out, so a spike looks like a spike.
+    const width = Math.max(0, thickness * (1 - step / Math.max(1, length)));
+    blob(voxels, x, y, z, Math.max(0.4, width), paint);
+  }
+}
+
+/** Paints a finished shape in one of several ways, purely for the look. */
+function paintRandomly(voxels: Uint8Array, rng: Generator, colour: number): void {
+  const scheme = rng.below(6);
+  const other = 1 + rng.below(PALETTE.length - 1);
+  const third = 1 + rng.below(PALETTE.length - 1);
+  const cutX = spread(rng);
+  const cutY = spread(rng);
+  const cutZ = spread(rng);
+
+  for (let x = 0; x < SHAPE_SIZE; x++) {
+    for (let y = 0; y < SHAPE_SIZE; y++) {
+      for (let z = 0; z < SHAPE_SIZE; z++) {
+        const index = cellIndex(x, y, z);
+        if (voxels[index] === 0) continue;
+        const dx = x - SHAPE_CENTRE;
+        const dy = y - SHAPE_CENTRE;
+        const dz = z - SHAPE_CENTRE;
+        switch (scheme) {
+          case 0:
+            voxels[index] = colour;
+            break;
+          case 1:
+            // Split down a slanted plane.
+            voxels[index] = dx * cutX + dy * cutY + dz * cutZ > 0 ? colour : other;
+            break;
+          case 2: {
+            // Rings, by how far out the cube sits.
+            const far = Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz) / 2.2);
+            voxels[index] = far % 2 === 0 ? colour : other;
+            break;
+          }
+          case 3:
+            // Layers, from bottom to top.
+            voxels[index] = [colour, other, third][Math.abs(y) % 3];
+            break;
+          case 4: {
+            // Speckled, but the same speckles for the same seed.
+            const pick = mix(x, y, z) % 3;
+            voxels[index] = [colour, other, third][pick];
+            break;
+          }
+          default:
+            // Checked, in blocks of three.
+            voxels[index] =
+              (Math.floor(x / 3) + Math.floor(y / 3) + Math.floor(z / 3)) % 2 === 0
+                ? colour
+                : other;
+            break;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * A chaotic ball, in one of a good many styles.
+ *
+ * The same seed always makes the same ball, so a design can be saved or
+ * shared; the workshop simply asks for a different seed each time the button
+ * is pressed. How it then rolls falls out of the shape, so a spiky one really
+ * is harder work than a smooth one.
+ */
+export function randomShape(seed: number, colour = 6): Uint8Array {
+  const rng = new Generator(seed >>> 0);
+  const voxels = new Uint8Array(SHAPE_CELLS);
+  const middle = SHAPE_CENTRE;
+  const reach = SHAPE_CENTRE;
+  const style = rng.below(RANDOM_STYLES);
+
+  switch (style) {
+    case 0: {
+      // Overlapping lumps: a potato.
+      const lumps = 3 + rng.below(5);
+      for (let lump = 0; lump < lumps; lump++) {
+        blob(
+          voxels,
+          middle + spread(rng) * reach * 0.45,
+          middle + spread(rng) * reach * 0.45,
+          middle + spread(rng) * reach * 0.45,
+          reach * (0.34 + unit(rng) * 0.4),
+          1,
+        );
+      }
+      break;
+    }
+    case 1: {
+      // A core with spikes all over it: a sea urchin.
+      blob(voxels, middle, middle, middle, reach * (0.3 + unit(rng) * 0.2), 1);
+      const spikes = 5 + rng.below(9);
+      for (let spike = 0; spike < spikes; spike++) {
+        const dx = spread(rng);
+        const dy = spread(rng);
+        const dz = spread(rng);
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        prong(
+          voxels,
+          middle,
+          middle,
+          middle,
+          dx / length,
+          dy / length,
+          dz / length,
+          Math.round(reach * (0.7 + unit(rng) * 0.35)),
+          1.6,
+          1,
+        );
+      }
+      break;
+    }
+    case 2: {
+      // A ring with a hole through the middle.
+      blob(voxels, middle, middle, middle, reach * 0.92, 1);
+      const axis = rng.below(3);
+      const bore = reach * (0.22 + unit(rng) * 0.2);
+      for (let step = -SHAPE_SIZE; step <= SHAPE_SIZE; step++) {
+        blob(
+          voxels,
+          middle + (axis === 0 ? step : 0),
+          middle + (axis === 1 ? step : 0),
+          middle + (axis === 2 ? step : 0),
+          bore,
+          0,
+        );
+      }
+      break;
+    }
+    case 3: {
+      // Slabs stacked at angles: something quarried.
+      const slabs = 2 + rng.below(4);
+      for (let piece = 0; piece < slabs; piece++) {
+        slab(
+          voxels,
+          middle + spread(rng) * reach * 0.4,
+          middle + spread(rng) * reach * 0.4,
+          middle + spread(rng) * reach * 0.4,
+          reach * (0.25 + unit(rng) * 0.55),
+          reach * (0.2 + unit(rng) * 0.5),
+          reach * (0.25 + unit(rng) * 0.55),
+          1,
+        );
+      }
+      break;
+    }
+    case 4: {
+      // Riddled with holes.
+      blob(voxels, middle, middle, middle, reach * (0.75 + unit(rng) * 0.2), 1);
+      const holes = 6 + rng.below(10);
+      for (let hole = 0; hole < holes; hole++) {
+        blob(
+          voxels,
+          middle + spread(rng) * reach,
+          middle + spread(rng) * reach,
+          middle + spread(rng) * reach,
+          reach * (0.14 + unit(rng) * 0.24),
+          0,
+        );
+      }
+      break;
+    }
+    case 5: {
+      // Long and thin: a roller rather than a ball.
+      const axis = rng.below(3);
+      const long = reach * (0.75 + unit(rng) * 0.25);
+      const thin = reach * (0.3 + unit(rng) * 0.25);
+      slab(
+        voxels,
+        middle,
+        middle,
+        middle,
+        axis === 0 ? long : thin,
+        axis === 1 ? long : thin,
+        axis === 2 ? long : thin,
+        1,
+      );
+      // Rounded off at the ends.
+      for (const end of [-1, 1]) {
+        blob(
+          voxels,
+          middle + (axis === 0 ? end * long : 0),
+          middle + (axis === 1 ? end * long : 0),
+          middle + (axis === 2 ? end * long : 0),
+          thin,
+          1,
+        );
+      }
+      break;
+    }
+    case 6: {
+      // Several balls in a cluster, joined by arms.
+      const balls = 3 + rng.below(4);
+      const spots: [number, number, number][] = [];
+      for (let ball = 0; ball < balls; ball++) {
+        const x = middle + spread(rng) * reach * 0.6;
+        const y = middle + spread(rng) * reach * 0.6;
+        const z = middle + spread(rng) * reach * 0.6;
+        spots.push([x, y, z]);
+        blob(voxels, x, y, z, reach * (0.22 + unit(rng) * 0.24), 1);
+      }
+      for (let i = 1; i < spots.length; i++) {
+        const [ax, ay, az] = spots[i - 1];
+        const [bx, by, bz] = spots[i];
+        const steps = Math.round(reach);
+        for (let step = 0; step <= steps; step++) {
+          const t = step / steps;
+          blob(voxels, ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t, 1.4, 1);
+        }
+      }
+      break;
+    }
+    case 7: {
+      // Cut flat by a few planes: a rough gemstone.
+      blob(voxels, middle, middle, middle, reach * 0.95, 1);
+      const cuts = 3 + rng.below(5);
+      for (let cut = 0; cut < cuts; cut++) {
+        const nx = spread(rng);
+        const ny = spread(rng);
+        const nz = spread(rng);
+        const length = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        const at = reach * (0.35 + unit(rng) * 0.45);
+        for (let x = 0; x < SHAPE_SIZE; x++) {
+          for (let y = 0; y < SHAPE_SIZE; y++) {
+            for (let z = 0; z < SHAPE_SIZE; z++) {
+              const along =
+                ((x - middle) * nx + (y - middle) * ny + (z - middle) * nz) / length;
+              if (along > at) voxels[cellIndex(x, y, z)] = 0;
+            }
+          }
+        }
+      }
+      break;
+    }
+    case 8: {
+      // A shell with the middle scooped out and windows cut in it.
+      blob(voxels, middle, middle, middle, reach * 0.95, 1);
+      blob(voxels, middle, middle, middle, reach * (0.45 + unit(rng) * 0.25), 0);
+      const windows = 3 + rng.below(5);
+      for (let window = 0; window < windows; window++) {
+        blob(
+          voxels,
+          middle + spread(rng) * reach,
+          middle + spread(rng) * reach,
+          middle + spread(rng) * reach,
+          reach * (0.2 + unit(rng) * 0.2),
+          0,
+        );
+      }
+      break;
+    }
+    default: {
+      // A staircase of blocks winding around the middle.
+      const turns = 3 + rng.below(6);
+      const rise = (reach * 1.6) / turns;
+      for (let turn = 0; turn < turns; turn++) {
+        const angle = (turn / turns) * Math.PI * 2 * (1 + unit(rng));
+        const out = reach * (0.25 + unit(rng) * 0.4);
+        slab(
+          voxels,
+          middle + Math.cos(angle) * out,
+          middle - reach * 0.8 + rise * turn,
+          middle + Math.sin(angle) * out,
+          reach * 0.28,
+          rise * 0.7,
+          reach * 0.28,
+          1,
+        );
+      }
+      break;
+    }
+  }
+
+  // A few extra lumps or bites, whatever the style, so no two are alike.
+  const extras = rng.below(4);
+  for (let extra = 0; extra < extras; extra++) {
+    blob(
+      voxels,
+      middle + spread(rng) * reach,
+      middle + spread(rng) * reach,
+      middle + spread(rng) * reach,
+      reach * (0.12 + unit(rng) * 0.22),
+      rng.below(2) === 0 ? 1 : 0,
+    );
+  }
+
+  let tidied = largestConnectedPart(voxels);
+  // A style can cut itself down to almost nothing. Rather than throwing the
+  // shape away, give it a core to hang on to: it keeps its character and
+  // becomes a ball somebody can actually get down a hill.
+  if (countFilled(tidied) < 250) {
+    blob(tidied, middle, middle, middle, reach * 0.5, 1);
+    tidied = largestConnectedPart(tidied);
+  }
+  if (countFilled(tidied) < 60) return defaultShape(colour);
+
+  paintRandomly(tidied, rng, colour);
+  return tidied;
+}
+
 /** What a design works out to once measured. */
 export interface ShapeStats {
   /** How many cubes were used. */
@@ -191,6 +619,12 @@ export interface ShapeStats {
   weight: number;
   /** How evenly the cubes sit around the middle, from 0 to ONE. */
   smoothness: number;
+  /**
+   * How much of the outside sticks out past the body the ball rests on,
+   * from 0 to ONE. One lump makes a little; a ball covered in them makes a
+   * lot, and each one is another thing to trip over as it rolls.
+   */
+  proudShare: number;
   /**
    * How hard the ball is to spin up, worked out from where its cubes sit.
    *
@@ -233,6 +667,9 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
   let outermost = 0;
   // The same measured over everything, used only if there is no body at all.
   let outermostIncludingSpikes = 0;
+  // Where every cube's outer face sits, kept so that the ones standing proud
+  // of the body can be counted once the body is known.
+  const faceReach: number[] = [];
 
   for (let x = 0; x < SHAPE_SIZE; x++) {
     for (let y = 0; y < SHAPE_SIZE; y++) {
@@ -260,6 +697,7 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
         const faceZ = Math.abs(midZ) + 1;
         const furthestFace = Math.max(faceX, faceY, faceZ);
         if (furthestFace > outermostIncludingSpikes) outermostIncludingSpikes = furthestFace;
+        faceReach.push(furthestFace);
 
         // A cube joined to the rest on at least three sides is part of the
         // body. One hanging off a corner is a whisker, and letting a whisker
@@ -297,6 +735,7 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
       reach: fallback,
       weight: ONE >> 3,
       smoothness: ONE,
+      proudShare: 0,
       spinResistance: Math.round(0.4 * ONE),
     };
   }
@@ -329,6 +768,15 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
     Math.round(1.4 * ONE),
   );
 
+  // How many cubes stand proud of the body, against how many are on the
+  // outside at all. One lump is a small share; a ball bristling with them is
+  // a large one, and every one is another thing to catch on.
+  let proud = 0;
+  for (const face of faceReach) {
+    if (face > outermost) proud++;
+  }
+  const proudShare = clamp(div(proud, Math.max(1, surfaceCount)), 0, ONE);
+
   const floor = Math.round((CUBE_METRES / 2) * ONE);
   return {
     cubes,
@@ -336,6 +784,7 @@ export function measureShape(voxels: Uint8Array): ShapeStats {
     reach: Math.max(floor, reach),
     weight,
     smoothness,
+    proudShare,
     spinResistance,
   };
 }

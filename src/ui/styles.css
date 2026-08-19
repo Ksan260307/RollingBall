@@ -430,54 +430,11 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.hud-lights-row {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-  align-items: center;
-  font-size: 13px;
-  color: var(--accent);
-}
 
-.hud-progress {
-  position: relative;
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  overflow: hidden;
-}
 
-.hud-progress-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0;
-  background: linear-gradient(90deg, var(--accent), var(--good));
-  transition: width 120ms linear;
-}
 
-.hud-progress-label {
-  position: absolute;
-  top: 12px;
-  left: 0;
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  color: var(--ink-soft);
-}
 
-.hud-mood {
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-  margin-top: 14px;
-}
 
-.hud-mood-fill {
-  height: 100%;
-  width: 0;
-  background: rgba(122, 210, 255, 0.7);
-  transition: width 320ms ease;
-}
 
 .hud-countdown {
   position: fixed;
@@ -521,6 +478,92 @@ body {
 
 .hud-warning.is-showing {
   opacity: 1;
+}
+
+.hud-stall {
+  position: fixed;
+  inset: auto 0 30% 0;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.hud-stall.is-showing {
+  opacity: 1;
+}
+
+.hud-stall-title {
+  font-size: clamp(15px, 4vw, 20px);
+  letter-spacing: 0.16em;
+  color: var(--ink);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.7);
+}
+
+.hud-stall-count {
+  font-size: clamp(34px, 10vw, 58px);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  text-shadow: 0 6px 30px rgba(0, 0, 0, 0.6);
+}
+
+.hud-stall.is-urgent .hud-stall-count {
+  color: var(--bad);
+  animation: throb 500ms ease-in-out infinite;
+}
+
+@keyframes throb {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+/* A wash of light across the screen at the start and at the finish. */
+.hud-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(80% 60% at 50% 55%, rgba(255, 255, 255, 0.85), transparent 70%);
+}
+
+.hud-flash.is-firing {
+  animation: wash 600ms ease-out;
+}
+
+@keyframes wash {
+  0% { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+
+.hud-banner {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.hud-banner.is-firing {
+  animation: banner 1400ms ease-out;
+}
+
+.hud-banner-text {
+  font-size: clamp(40px, 13vw, 96px);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  text-shadow: 0 10px 44px rgba(0, 0, 0, 0.6);
+}
+
+@keyframes banner {
+  0% { opacity: 0; transform: scale(0.7); }
+  18% { opacity: 1; transform: scale(1.06); }
+  70% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.02); }
 }
 
 .hud-tools {
@@ -593,6 +636,10 @@ body {
   display: grid;
   gap: 8px;
   margin-top: 6px;
+}
+
+.panel.is-lose .panel-head {
+  background: linear-gradient(120deg, rgba(255, 123, 123, 0.24), transparent);
 }
 
 .panel.is-win .panel-head {
@@ -721,24 +768,52 @@ body {
   padding: 12px 14px;
 }
 
+/*
+ * A grid rather than a run of swatches: nine to a row, so the same hue sits
+ * in the same column all the way down and the eye can find it again.
+ */
 .palette {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 6px;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.22);
 }
 
 .swatch {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  border: 2px solid transparent;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-width: 0;
+  border-radius: 8px;
+  border: 2px solid rgba(0, 0, 0, 0.35);
   cursor: pointer;
   padding: 0;
+  transition: transform 0.08s ease;
 }
 
+.swatch:hover {
+  transform: scale(1.12);
+}
+
+/* The chosen one gets a ring that reads against light and dark alike. */
 .swatch.is-active {
   border-color: #ffffff;
-  transform: scale(1.08);
+  transform: scale(1.12);
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.55),
+    0 0 0 4px #ffffff;
+}
+
+@media (max-width: 520px) {
+  .palette {
+    gap: 4px;
+    padding: 6px;
+  }
+
+  .swatch {
+    border-radius: 6px;
+  }
 }
 
 /* A row of large, obvious tool buttons: which one is on must be unmissable. */
@@ -877,5 +952,84 @@ body {
   * {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * The bar over a replay. It sits along the bottom so it never covers the
+ * ball, and it stays out of the way of the pointer everywhere except on the
+ * buttons themselves.
+ */
+.replay-bar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(var(--pad), env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(12, 16, 28, 0.72);
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+  max-width: calc(100% - 2 * var(--pad));
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.replay-bar.is-hidden {
+  display: none;
+}
+
+.replay-bar .button {
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+
+.replay-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.replay-label {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  padding-left: 6px;
+}
+
+/* Fixed-width digits, so the clock does not jiggle as it counts. */
+.replay-clock {
+  font-variant-numeric: tabular-nums;
+  min-width: 4.5ch;
+  text-align: right;
+  opacity: 0.85;
+}
+
+@media (max-width: 520px) {
+  /* Wrapped onto two rows, a pill shape stops looking like one, so the bar
+     squares off into a rounded panel instead. */
+  .replay-bar {
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 18px;
+    left: var(--pad);
+    right: var(--pad);
+    transform: none;
+    max-width: none;
+  }
+
+  .replay-bar .button {
+    padding: 7px 10px;
+    font-size: 0.82rem;
+    flex: 1 1 auto;
+  }
+
+  /* Name and clock keep a row of their own; the buttons share the next. */
+  .replay-head {
+    flex: 1 0 100%;
+    justify-content: center;
   }
 }

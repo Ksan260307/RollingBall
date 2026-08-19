@@ -15,7 +15,6 @@ export interface RunResult {
   seconds: number;
   metres: number;
   topSpeed: number;
-  collected: number;
   steps: number;
   checksum: number;
 }
@@ -38,7 +37,6 @@ export function runWithAutopilot(world: World, limitSeconds = 120): RunResult {
     seconds: world.secondsFor(0),
     metres: world.travelled[0] / ONE,
     topSpeed: world.topSpeed[0] / ONE,
-    collected: world.collected[0],
     steps,
     checksum: world.checksum(),
   };

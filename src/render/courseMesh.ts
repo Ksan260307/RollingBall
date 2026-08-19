@@ -20,14 +20,18 @@ import {
 } from 'three';
 import { Course, PointFlag, Surface } from '../core/course';
 import { ONE } from '../core/fixed';
+import { WALL_HEIGHT as WALL_HEIGHT_UNITS } from '../core/simulation';
 
 /** Turns a stored whole number into metres for the drawing code. */
 export function toMetres(value: number): number {
   return value / ONE;
 }
 
-/** How tall the low walls stand. */
-const WALL_HEIGHT = 0.55;
+/**
+ * How tall the railings stand, taken straight from the rules so the barrier
+ * you can see is exactly the barrier the ball runs into.
+ */
+const WALL_HEIGHT = WALL_HEIGHT_UNITS / ONE;
 
 /** How far the glowing edge strip reaches inward from the floor edge. */
 const EDGE_WIDTH = 0.32;
