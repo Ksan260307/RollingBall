@@ -16,6 +16,15 @@ export class Hud {
   readonly root: HTMLElement;
   /** The glow at the edges of the screen when moving fast. */
   private readonly rush = el('div', { class: 'speed-rush' });
+  /** Which way the wind is blowing, and how hard. */
+  private readonly windArrow = el('span', { class: 'wind-arrow' });
+  private readonly wind = el(
+    'div',
+    { class: 'hud-wind is-hidden' },
+    this.windArrow,
+    el('span', { class: 'wind-word', text: TEXT.windLabel }),
+  );
+
   /** How far ahead of, or behind, the best run so far. */
   private readonly gap = el('div', { class: 'hud-gap is-hidden' });
   /** The arrow under the finger, showing which way the ball is being sent. */
@@ -62,6 +71,7 @@ export class Hud {
       { class: 'hud', id: 'hud' },
       this.rush,
       this.dragGuide,
+      this.wind,
       this.gap,
       el(
         'div',
@@ -104,6 +114,29 @@ export class Hud {
   }
 
   /** Refreshes everything from the run in progress. */
+  /**
+   * Shows which way the wind is blowing and how hard.
+   *
+   * Being blown off a course by something invisible is the sort of thing
+   * that reads as the game cheating. An arrow that leans over as the gust
+   * comes up turns it into something to play against.
+   *
+   * @param blowing which way and how hard, from -1 (left) to 1 (right)
+   */
+  setWind(blowing: number): void {
+    const force = Math.abs(blowing);
+    if (force < 0.06) {
+      this.wind.classList.add('is-hidden');
+      return;
+    }
+    this.wind.classList.remove('is-hidden');
+    this.windArrow.textContent = blowing > 0 ? '▶' : '◀';
+    // Grows and brightens with the gust, so a lull is plain too.
+    this.windArrow.style.transform = `scaleX(${(0.6 + force * 0.9).toFixed(2)})`;
+    this.wind.style.opacity = String(0.45 + force * 0.55);
+    this.wind.classList.toggle('is-strong', force > 0.6);
+  }
+
   /**
    * Draws the arrow under the finger.
    *
@@ -274,6 +307,7 @@ export class Hud {
   /** Puts the countdown back to the start for a fresh attempt. */
   reset(): void {
     this.gap.classList.add('is-hidden');
+    this.wind.classList.add('is-hidden');
     this.dragGuide.classList.add('is-hidden');
     this.lastCountdown = -1;
     this.lastFalls = 0;

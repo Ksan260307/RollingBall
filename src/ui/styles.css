@@ -1602,3 +1602,45 @@ body {
     display: none;
   }
 }
+
+/*
+ * Which way the wind is blowing.
+ *
+ * Under the speed, on the same side, because it is the other thing pushing
+ * the ball about. Hidden entirely on a still course rather than sitting
+ * there saying nothing.
+ */
+.hud-wind {
+  position: absolute;
+  top: calc(max(var(--pad), env(safe-area-inset-top)) + 84px);
+  right: max(var(--pad), env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(12, 16, 28, 0.55);
+  backdrop-filter: blur(6px);
+  transition: opacity 200ms linear;
+}
+
+.hud-wind.is-hidden {
+  display: none;
+}
+
+.wind-arrow {
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #bfe6ff;
+  transition: transform 200ms ease;
+}
+
+.hud-wind.is-strong .wind-arrow {
+  color: var(--accent);
+}
+
+.wind-word {
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  opacity: 0.7;
+}

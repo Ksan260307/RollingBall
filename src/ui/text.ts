@@ -41,6 +41,7 @@ export const TEXT = {
   gapAhead: 'ベストより はやい',
   gapBehind: 'ベストより おそい',
   leanLabel: 'おもり',
+  windLabel: 'かぜ',
   recipeTitle: 'ボールを ほぞん・わたす',
   recipeHint: 'なまえを つけて ほぞんできます。四角い絵を ほかの人に よみとって もらうと、おなじ ボールが つくれます。',
   recipeName: 'ボールの なまえ',
@@ -146,6 +147,7 @@ export const TEXT = {
   settingsSound: '音',
   settingsInvert: '上下の操作を逆に',
   settingsGhost: 'ベストの走りと ならんで走る',
+  settingsLean: 'おもりボタンを 出す（PCは Q と E）',
   settingsClear: '記録をけす',
   settingsCleared: '記録をけしました',
 

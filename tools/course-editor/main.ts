@@ -26,7 +26,9 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import { buildCourse } from '../../src/core/course';
+import { type CoursePiece, buildCourse } from '../../src/core/course';
+import { type StoredPiece, branchCloses, branchGap } from '../../src/game/stages';
+import { describeGap, fitBranch } from './fit';
 import { toNumber } from '../../src/core/fixed';
 import { defaultShape, measureShape } from '../../src/core/ballShape';
 import { RunState, STEPS_PER_SECOND, World } from '../../src/core/simulation';
@@ -273,6 +275,20 @@ function numberField(
  * Keeping left at the split takes the branch; keeping right stays on the
  * main line.
  */
+/** Turns a built stretch back into the plain form the file keeps. */
+function storedFromPiece(piece: CoursePiece): StoredPiece {
+  const round = (value: number): number => Math.round(value * 100) / 100;
+  const stored: StoredPiece = {
+    length: round(piece.length),
+    width: round(piece.width ?? 8),
+    walls: piece.walls === true,
+  };
+  if (piece.turn) stored.turn = round(piece.turn);
+  if (piece.drop) stored.drop = round(piece.drop);
+  if (piece.bank) stored.bank = round(piece.bank);
+  return stored;
+}
+
 function branchPanel(course: StoredCourse): HTMLElement {
   const has = !!course.branch;
   const rows: HTMLElement[] = [
@@ -338,10 +354,33 @@ function branchPanel(course: StoredCourse): HTMLElement {
         ),
       );
     });
+    // Whether it comes back, and a way to make it come back.
+    const built = course.pieces.map(pieceFromStored);
+    const detour = branch.pieces.map(pieceFromStored);
+    const gap = branchGap(built, detour, branch.from, branch.to);
+    const closes = branchCloses(gap);
     rows.push(
       el('p', {
+        class: closes ? 'note note-good' : 'note note-bad',
+        text: `${closes ? '合流します' : '合流しません（このままでは 本編に出ません）'}： ${describeGap(gap)}`,
+      }),
+      el(
+        'div',
+        { class: 'row' },
+        button('自動で つなぐ', () => {
+          const holder = document.querySelector('.branch-panel .note') as HTMLElement | null;
+          if (holder) holder.textContent = '計算中…';
+          // Given back to the browser first, so the message is seen.
+          window.setTimeout(() => {
+            const fitted = fitBranch(built, detour, branch.from, branch.to);
+            branch.pieces = fitted.pieces.map(storedFromPiece);
+            renderAll();
+          }, 30);
+        }),
+      ),
+      el('p', {
         class: 'note',
-        text: 'ひだりに よると わかれ道、みぎに よると 本線です。ふたつの道は 合流しません（それぞれの ゴールに つきます）。',
+        text: 'ひだりに よると わかれ道、みぎに よると 本線です。合流しない わかれ道は 本編では 使われません。',
       }),
     );
   }

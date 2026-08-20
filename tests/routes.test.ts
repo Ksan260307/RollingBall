@@ -11,9 +11,67 @@ import { packControls } from '../src/core/input';
 import { defaultShape, measureShape, randomShape } from '../src/core/ballShape';
 import { buildCourse } from '../src/core/course';
 import { RunState, World, capture, rewind } from '../src/core/simulation';
-import { STAGES, altCourseFor, courseFor, stageById } from '../src/game/stages';
+import {
+  STAGES,
+  altCourseFor,
+  branchCloses,
+  branchGap,
+  courseFor,
+  pieceFromStored,
+  stageFromStored,
+} from '../src/game/stages';
+import type { StoredCourse } from '../src/game/stages';
 
-const forkStage = stageById('fork');
+/**
+ * A course with two ways down, built here rather than shipped.
+ *
+ * No course in the game forks at the moment, but the machinery that makes
+ * one work is still there and still has to keep working, so the test brings
+ * its own.
+ */
+const forkStage = stageFromStored(
+  {
+    id: 'test-fork',
+    name: 'ふたまた',
+    blurb: '',
+    difficulty: 2,
+    mood: {
+      sky: '#7fd6c4',
+      horizon: '#e3fbf5',
+      ground: '#4f7a63',
+      floor: '#e9f2ee',
+      edge: '#ffb703',
+      fog: 175,
+    },
+    breeze: 0,
+    seed: 5150422,
+    targetSeconds: 20,
+    pieces: [
+      { length: 12, drop: 9, width: 10, walls: true },
+      { length: 12, drop: 7, width: 15, walls: true },
+      { length: 16, turn: 24, drop: 6, width: 11, bank: 6, walls: true },
+      { length: 16, turn: -18, drop: 6, width: 11, bank: -4, walls: true },
+      { length: 16, turn: 14, drop: 6, width: 10, walls: true },
+      { length: 14, drop: 7, width: 10, walls: true },
+      { length: 14, drop: 7, width: 10, walls: true },
+    ],
+    branch: {
+      from: 2,
+      to: 5,
+      // The last two stretches were worked out by the editor's closer, not
+      // by hand: a branch has to arrive back at the main line in the right
+      // place, at the right height and pointing the right way, and nobody
+      // hits three things at once by writing numbers in.
+      pieces: [
+        { length: 10, turn: -26, drop: 4.79, width: 3.2, walls: true },
+        { length: 12, turn: -6, drop: 4.79, width: 2.8, walls: true, surface: 'slick' },
+        { length: 23, turn: 114, drop: 4.79, width: 6, walls: true },
+        { length: 14, turn: -62, drop: 4.79, width: 6, walls: true },
+      ],
+    },
+  } as StoredCourse,
+  0,
+);
 
 /** Rolls the fork course, holding a steer through the split. */
 function takeFork(bias: number): { route: number; seconds: number; finished: boolean } {
@@ -43,11 +101,14 @@ function takeFork(bias: number): { route: number; seconds: number; finished: boo
 }
 
 describe('a course with two ways down', () => {
-  it('has a second way, and it is the shorter one', () => {
+  it('has a second way, and it is a different length', () => {
+    // Not necessarily shorter. Bringing a branch back to the main line
+    // costs track, so a branch that closes is often the longer way round —
+    // a shortcut has to be drawn heading for the rejoin from the start.
     const main = courseFor(forkStage);
     const alt = altCourseFor(forkStage);
     expect(alt).not.toBeNull();
-    expect(alt!.totalLength).toBeLessThan(main.totalLength);
+    expect(alt!.totalLength).not.toBe(main.totalLength);
     expect(forkStage.forkAt).toBeGreaterThan(0);
   });
 
@@ -56,13 +117,13 @@ describe('a course with two ways down', () => {
     expect(takeFork(0.5).route).toBe(0);
   });
 
-  it('makes the short way worth taking, and both ways finishable', () => {
-    const quick = takeFork(-1);
-    const safe = takeFork(0.5);
-    expect(quick.finished).toBe(true);
-    expect(safe.finished).toBe(true);
-    // Worth the risk, or nobody would ever take it.
-    expect(quick.seconds).toBeLessThan(safe.seconds);
+  it('makes both ways finishable, and makes them different', () => {
+    const branchWay = takeFork(-1);
+    const mainWay = takeFork(0.5);
+    expect(branchWay.finished).toBe(true);
+    expect(mainWay.finished).toBe(true);
+    // A choice that made no difference would not be a choice.
+    expect(Math.abs(branchWay.seconds - mainWay.seconds)).toBeGreaterThan(0.5);
   });
 
   it('will not change its mind once the split is behind it', () => {
@@ -113,9 +174,8 @@ describe('a course with two ways down', () => {
     expect(world.route[0]).toBe(wentLeft);
   });
 
-  it('leaves the courses that do not fork exactly as they were', () => {
+  it('leaves every shipped course alone, none of which forks', () => {
     for (const stage of STAGES) {
-      if (stage.id === 'fork') continue;
       expect(altCourseFor(stage)).toBeNull();
     }
   });
@@ -196,5 +256,61 @@ describe('throwing the ball weight about while it rolls', () => {
     }
     rewind(world, held);
     expect(world.lean[0]).toBe(held.lean[0]);
+  });
+});
+
+describe('deciding whether a fork actually rejoins', () => {
+  const main = [
+    { length: 12, drop: 9, width: 10, walls: true },
+    { length: 12, drop: 7, width: 15, walls: true },
+    { length: 16, turn: 24, drop: 6, width: 11, bank: 6, walls: true },
+    { length: 16, turn: -18, drop: 6, width: 11, bank: -4, walls: true },
+    { length: 16, turn: 14, drop: 6, width: 10, walls: true },
+    { length: 14, drop: 7, width: 10, walls: true },
+  ].map(pieceFromStored);
+
+  it('measures a way that goes nowhere near as not rejoining', () => {
+    const wanders = [
+      { length: 10, turn: -26, drop: 13, width: 3.2, walls: true },
+      { length: 12, turn: -6, drop: 14, width: 2.8, walls: true },
+    ].map(pieceFromStored);
+    const gap = branchGap(main, wanders, 2, 5);
+    expect(gap.apart).toBeGreaterThan(10);
+    expect(branchCloses(gap)).toBe(false);
+  });
+
+  it('measures the way the main course goes as rejoining exactly', () => {
+    // The stretches being replaced obviously arrive where they arrive.
+    const gap = branchGap(main, main.slice(2, 5), 2, 5);
+    expect(gap.apart).toBeCloseTo(0, 5);
+    expect(gap.facing).toBeCloseTo(0, 4);
+    expect(branchCloses(gap)).toBe(true);
+  });
+
+  it('refuses to use a fork that does not come back', () => {
+    // Rather than putting a second finish out in a field somewhere, a
+    // branch that misses is simply not used and the course plays as one.
+    const stage = stageFromStored(
+      {
+        ...(forkStage as unknown as StoredCourse),
+        id: 'broken-fork',
+        pieces: [
+          { length: 12, drop: 9, width: 10, walls: true },
+          { length: 12, drop: 7, width: 15, walls: true },
+          { length: 16, turn: 24, drop: 6, width: 11, walls: true },
+          { length: 16, turn: -18, drop: 6, width: 11, walls: true },
+          { length: 16, turn: 14, drop: 6, width: 10, walls: true },
+          { length: 14, drop: 7, width: 10, walls: true },
+        ],
+        branch: {
+          from: 2,
+          to: 5,
+          pieces: [{ length: 10, turn: -80, drop: 20, width: 3, walls: true }],
+        },
+      } as StoredCourse,
+      0,
+    );
+    expect(stage.altPieces).toBeUndefined();
+    expect(altCourseFor(stage)).toBeNull();
   });
 });

@@ -11,6 +11,8 @@ import {
   AmbientLight,
   BufferAttribute,
   BufferGeometry,
+  LineBasicMaterial,
+  LineSegments,
   DoubleSide,
   BackSide,
   BoxGeometry,
@@ -58,6 +60,9 @@ const LOOK_AHEAD = 6.0;
 
 /** How many sparkle pieces can be in the air at once. */
 const SPARKLE_COUNT = 72;
+
+/** How many streaks of blowing air can be in the picture at once. */
+const WIND_STREAKS = 90;
 
 /** How long a knock rattles the camera for. */
 const SHAKE_SECONDS = 0.34;
@@ -173,6 +178,11 @@ export class GameView {
   private shakeLeft = 0;
   private shakeStrength = 0;
 
+  /** Streaks of air blowing across the course, drawn only when it is. */
+  private windLines: LineSegments | null = null;
+  private windSeeds: Float32Array | null = null;
+  private windPositions: Float32Array | null = null;
+
   /** The pale copy of your best run, racing alongside. */
   private readonly ghostGroup = new Group();
   private ghostMesh: Mesh | null = null;
@@ -241,6 +251,7 @@ export class GameView {
     this.buildSceneryLayers();
     this.buildSparkles();
     this.buildTrail();
+    this.buildWind();
     this.resize();
 
     // Follow the canvas itself, so the picture is right however the page was
@@ -619,6 +630,85 @@ export class GameView {
     this.scene.add(this.trail);
   }
 
+  /**
+   * Builds the streaks that show the air moving.
+   *
+   * Short lines rather than anything cleverer: what the eye picks up is
+   * things flying past, and a line pointing the way it is going says that
+   * more plainly than a cloud of dots would. They are laid out once and
+   * moved about afterwards, so nothing is made while playing.
+   */
+  private buildWind(): void {
+    const geometry = new BufferGeometry();
+    this.windPositions = new Float32Array(WIND_STREAKS * 2 * 3);
+    this.windSeeds = new Float32Array(WIND_STREAKS * 3);
+    for (let i = 0; i < WIND_STREAKS; i++) {
+      // Scattered about the ball, high and low, near and far.
+      this.windSeeds[i * 3] = (i * 37) % 100 / 100;
+      this.windSeeds[i * 3 + 1] = (i * 61) % 100 / 100;
+      this.windSeeds[i * 3 + 2] = (i * 89) % 100 / 100;
+    }
+    geometry.setAttribute('position', new BufferAttribute(this.windPositions, 3));
+    const material = new LineBasicMaterial({
+      color: new Color('#ffffff'),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    this.windLines = new LineSegments(geometry, material);
+    this.windLines.frustumCulled = false;
+    this.windLines.visible = false;
+    this.scene.add(this.windLines);
+  }
+
+  /**
+   * Blows the streaks across the course, as hard as the wind is blowing.
+   *
+   * They cross the way the wind is pushing the ball, so which way to lean is
+   * something you can see rather than something you work out after being
+   * blown off.
+   */
+  private updateWind(world: World, bx: number, by: number, bz: number, seconds: number): void {
+    if (!this.windLines || !this.windSeeds || !this.windPositions) return;
+    const blowing = world.windNow ? world.windNow() / ONE : 0;
+    const force = Math.abs(blowing);
+    if (!this.richGraphics || force < 0.06) {
+      this.windLines.visible = false;
+      return;
+    }
+
+    const course = world.courseFor(0);
+    const point = Math.min(course.count - 1, Math.max(0, courseIndexOf(world)));
+    // Across the course, which is the way the wind pushes.
+    const acrossX = toMetres(course.rightX[point]) * Math.sign(blowing);
+    const acrossY = toMetres(course.rightY[point]) * Math.sign(blowing);
+    const acrossZ = toMetres(course.rightZ[point]) * Math.sign(blowing);
+
+    const spread = 26;
+    const length = 1.4 + force * 3.4;
+    const speed = 14 + force * 26;
+    for (let i = 0; i < WIND_STREAKS; i++) {
+      const a = this.windSeeds[i * 3];
+      const b = this.windSeeds[i * 3 + 1];
+      const c = this.windSeeds[i * 3 + 2];
+      // Each streak runs across and starts again, at its own pace.
+      const along = ((a + (seconds * speed) / 40) % 1) - 0.5;
+      const x = bx + acrossX * along * spread + (b - 0.5) * spread * 0.7;
+      const y = by + (c - 0.35) * 9;
+      const z = bz + acrossZ * along * spread + (c - 0.5) * spread * 0.7;
+      const base = i * 6;
+      this.windPositions[base] = x;
+      this.windPositions[base + 1] = y;
+      this.windPositions[base + 2] = z;
+      this.windPositions[base + 3] = x + acrossX * length;
+      this.windPositions[base + 4] = y + acrossY * length;
+      this.windPositions[base + 5] = z + acrossZ * length;
+    }
+    this.windLines.geometry.getAttribute('position').needsUpdate = true;
+    (this.windLines.material as LineBasicMaterial).opacity = Math.min(0.62, force * 0.8);
+    this.windLines.visible = true;
+  }
+
   /** Forgets where the ball has been, for the start of a run. */
   private clearTrail(): void {
     this.trailPath.length = 0;
@@ -845,6 +935,7 @@ export class GameView {
 
     this.updateScenery(world, seconds);
     this.updateSparkles(delta);
+    this.updateWind(world, bx, by, bz, seconds);
 
     this.sunlight.position.set(bx - 24, by + 46, bz - 18);
     this.sunlight.target.position.set(bx, by, bz);

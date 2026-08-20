@@ -182,6 +182,8 @@ function main(): void {
         settings = next;
         controls.invertPush = settings.invertPush;
         sounds.setEnabled(settings.sound);
+        leanTools.classList.toggle('is-hidden', mode !== 'playing' || !settings.leanButtons);
+        if (!settings.leanButtons) controls.leanButton = 0;
         view.zoom = settings.zoom;
         view.richGraphics = settings.richGraphics;
         saveSettings(settings);
@@ -326,7 +328,7 @@ function main(): void {
     if (!playing) sounds.quieten();
     hud.setVisible(playing);
     tools.classList.toggle('is-hidden', !playing);
-    leanTools.classList.toggle('is-hidden', !playing);
+    leanTools.classList.toggle('is-hidden', !playing || !settings.leanButtons);
     if (!playing) controls.leanButton = 0;
     controls.enabled = playing;
     if (!playing) controls.reset();
@@ -620,6 +622,7 @@ function main(): void {
           }
           hud.update(active);
           hud.setRush(active.world.speedFor(0) / ONE);
+          hud.setWind(active.world.windNow() / ONE);
           sounds.playMoments(active.world.moments);
           // The rolling sound belongs to a ball that is still rolling. The
           // run can end several frames before the result panel arrives, and

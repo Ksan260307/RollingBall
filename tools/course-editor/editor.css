@@ -332,3 +332,27 @@ label.tick input {
   flex: 0 0 auto;
   margin: 0;
 }
+
+/* Whether a branch comes back to the course it left. */
+.branch-panel {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.branch-panel h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.note-good {
+  color: #67e8a0;
+}
+
+.note-bad {
+  color: #ff8f8f;
+}

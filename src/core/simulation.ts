@@ -16,7 +16,7 @@
  */
 
 import { Course, type Placement, PointFlag, Surface, placeOnCourse } from './course';
-import { ONE, abs, clamp, div, length3, mul, sign, sine } from './fixed';
+import { FULL_TURN, ONE, abs, clamp, div, length3, mul, sign, sine } from './fixed';
 import {
   Triple,
   dot,
@@ -139,13 +139,13 @@ const RECOVERY_HOLD = Math.round(0.7 * STEPS_PER_SECOND);
  * come back, so a lean is a commitment; and holding one costs smoothness,
  * because weight held out to one side is weight going round unevenly.
  */
-const LEAN_PUSH = Math.round(0.011 * ONE);
+const LEAN_PUSH = Math.round(0.03 * ONE);
 
 /** How quickly the weight can be thrown from one side to the other. */
-const LEAN_EASE = Math.round(0.06 * ONE);
+const LEAN_EASE = Math.round(0.12 * ONE);
 
 /** How much a held lean unsettles the run, as a share of a full lean. */
-const LEAN_UNSETTLES = Math.round(0.5 * ONE);
+const LEAN_UNSETTLES = Math.round(0.15 * ONE);
 
 /** How far past the split the choice stays open, in stored metres. */
 const FORK_WINDOW = Math.round(6 * ONE);
@@ -206,7 +206,23 @@ const AIR_RESISTANCE = Math.round(0.0062 * ONE);
 const AIR_SPIN_KEEP = Math.round(0.9985 * ONE);
 
 /** How much a sideways gust can shift the ball on a breezy course. */
-const BREEZE_PUSH = Math.round(3.2 * ONE);
+const BREEZE_PUSH = Math.round(4 * ONE);
+
+/**
+ * How long the wind takes to get up and die away again, in steps.
+ *
+ * A wind that blew evenly the whole way down would just be a slope to one
+ * side: you would lean against it once and forget it. Coming and going is
+ * what makes it something to watch for, so this is measured in seconds
+ * rather than in anything smaller.
+ */
+const GUST_PERIOD = 9 * STEPS_PER_SECOND;
+
+/** A second, slower swell, so the gusts do not arrive like a metronome. */
+const GUST_SWELL = 23 * STEPS_PER_SECOND;
+
+/** How much of the wind is always there, with the rest coming in gusts. */
+const GUST_FLOOR = Math.round(0.18 * ONE);
 
 /** Fastest the ball is ever allowed to travel. */
 const SPEED_LIMIT = Math.round(34 * ONE);
@@ -812,6 +828,47 @@ export class World {
     return this.stallCountdown[player] < STALL_COUNT;
   }
 
+  /**
+   * How hard the wind is blowing at this moment, from 0 to ONE.
+   *
+   * Two waves of different lengths laid over each other, so it comes and
+   * goes without ever settling into a rhythm anybody could count. It is
+   * worked out from the step number alone, which keeps it the same on every
+   * device and in every replay.
+   */
+  gustNow(): number {
+    return abs(this.windNow());
+  }
+
+  /**
+   * Which way the wind is blowing and how hard, from -ONE to ONE.
+   *
+   * Signed, and slow to change its mind. A wind made of fast noise averages
+   * out to nothing over any distance and cannot be felt at all; one that
+   * leans on the ball from the same side for several seconds together has
+   * to be leant back against, which is the whole point of having it.
+   */
+  windNow(): number {
+    if (this.breeze <= 0) return 0;
+    const swing = sine(Math.round((this.step * FULL_TURN) / GUST_SWELL) & 0xffff);
+    const gust = sine(Math.round((this.step * FULL_TURN) / GUST_PERIOD) & 0xffff);
+    // How hard it is blowing: never quite nothing, and rarely everything.
+    const strength = clamp(
+      GUST_FLOOR + mul(ONE - GUST_FLOOR, (mul(gust, Math.round(0.7 * ONE)) + ONE) / 2),
+      0,
+      ONE,
+    );
+    return clamp(mul(strength, swing), -ONE, ONE);
+  }
+
+  /** How hard the wind is where this player is, from 0 to ONE. */
+  windOn(player = 0): number {
+    if (this.breeze <= 0) return 0;
+    const c = this.courseFor(player);
+    const point = Math.min(c.count - 1, Math.max(0, this.hint[player]));
+    return clamp(mul(mul(this.breeze, c.wind[point]), this.gustNow()), 0, ONE);
+  }
+
   /** The course this player is going round. */
   courseFor(player = 0): Course {
     return this.route[player] === 1 && this.alt ? this.alt : this.course;
@@ -968,7 +1025,8 @@ export class World {
       }
     }
 
-    // A breeze crossing the course, read straight from the surroundings.
+    // A breeze crossing the course, read from the surroundings and from how
+    // hard it happens to be blowing just now.
     if (this.breeze > 0 && where.wind > 0) {
       const alongCell = div(where.travelled, Math.round(2 * ONE));
       const acrossFraction = div(
@@ -983,9 +1041,14 @@ export class World {
       // A push, not an acceleration: the same wind moves a light ball a
       // long way and a heavy one hardly at all. This is what makes weight
       // worth having on an exposed course.
+      // Mostly the steady lean of the wind, with a little of the roughness
+      // of the air over the ground on top of it.
+      const blowing =
+        mul(this.windNow(), Math.round(0.55 * ONE)) +
+        mul(clamp(gust, -ONE, ONE), Math.round(0.45 * ONE));
       const strength = mul(this.breeze, where.wind);
       const nudge = div(
-        mul(mul(BREEZE_PUSH, strength), clamp(gust, -ONE, ONE)),
+        mul(mul(BREEZE_PUSH, strength), blowing),
         Math.max(1, this.feel.weight),
       );
       accelX += mul(rightX, nudge);
@@ -1034,7 +1097,7 @@ export class World {
       this.applyGrip(player, upX, upY, upZ, hold, true);
       this.applyRollingDrag(player, upX, upY, upZ, floor, pressing);
       this.tripOverBumps(player, upX, upY, upZ, where.travelled);
-      this.wanderOffLine(player, upX, upY, upZ, where.travelled);
+      this.wanderOffLine(player, upX, upY, upZ, rightX, rightY, rightZ, where.travelled);
       this.turnUnevenly(player, where.travelled);
     } else {
       // Off the ground the spin simply carries on.
@@ -1242,6 +1305,9 @@ export class World {
     upX: number,
     upY: number,
     upZ: number,
+    rightX: number,
+    rightY: number,
+    rightZ: number,
     travelled: number,
   ): void {
     if (this.feel.veer <= 0 && this.lean[player] === 0) return;
@@ -1266,15 +1332,23 @@ export class World {
     const phase = div(travelled, VEER_WAVELENGTH) & 0xffff;
     const swing = sine(phase);
 
-    // What the shape does on its own, plus whatever the player is throwing
-    // about on purpose. A steady lean can be held against a shape that
-    // pulls, which is how an awkward ball is kept honest.
-    const push =
-      mul(mul(mul(VEER_PUSH, this.feel.veer), speed), swing) +
-      mul(mul(LEAN_PUSH, -this.lean[player]), speed);
+    // What the shape does on its own: across the way the ball is going, so
+    // it throws the ball off whatever line it is holding.
+    const push = mul(mul(mul(VEER_PUSH, this.feel.veer), speed), swing);
     this.velocityX[player] += mul(sideX, push);
     this.velocityY[player] += mul(sideY, push);
     this.velocityZ[player] += mul(sideZ, push);
+
+    // A lean goes across the course rather than across the ball's own path.
+    // Across its path it would only bend the ball round in a circle and
+    // bring it back where it started, which is no use to anybody trying to
+    // move over one lane.
+    if (this.lean[player] !== 0) {
+      const thrown = mul(mul(LEAN_PUSH, this.lean[player]), speed);
+      this.velocityX[player] += mul(rightX, thrown);
+      this.velocityY[player] += mul(rightY, thrown);
+      this.velocityZ[player] += mul(rightZ, thrown);
+    }
   }
 
   /**

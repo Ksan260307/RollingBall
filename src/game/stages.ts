@@ -190,6 +190,91 @@ export function stageFromStored(stored: StoredCourse, index: number): Stage {
 }
 
 /**
+ * Where a run of stretches leaves you, starting from nothing.
+ *
+ * Position, height and which way you are pointing. Used to ask whether two
+ * different ways round arrive at the same place, which is the whole
+ * difficulty with a fork: a way that never comes back is not a fork, it is
+ * a second course with its own finish somewhere else entirely.
+ */
+export interface Pose {
+  x: number;
+  y: number;
+  z: number;
+  /** Which way it faces at the end, as a direction of unit length. */
+  facingX: number;
+  facingZ: number;
+}
+
+/** Follows a run of stretches and says where it ends up. */
+export function poseAfter(pieces: CoursePiece[]): Pose {
+  if (pieces.length === 0) return { x: 0, y: 0, z: 0, facingX: 0, facingZ: 1 };
+  const course = buildCourse(pieces, 0);
+  const last = course.count - 1;
+  return {
+    x: course.x[last] / ONE,
+    y: course.y[last] / ONE,
+    z: course.z[last] / ONE,
+    facingX: course.forwardX[last] / ONE,
+    facingZ: course.forwardZ[last] / ONE,
+  };
+}
+
+/**
+ * How far a branch misses the place it is meant to rejoin.
+ *
+ * Everything is in metres and degrees, measured between where the replaced
+ * stretches would have left you and where the branch actually does.
+ */
+export interface BranchGap {
+  /** How far apart the two ends are, along the ground. */
+  apart: number;
+  /** How far apart in height. */
+  height: number;
+  /** How differently they are pointing, in degrees. */
+  facing: number;
+}
+
+/** How close a branch comes to rejoining the course it left. */
+export function branchGap(pieces: CoursePiece[], branch: CoursePiece[], from: number, to: number): BranchGap {
+  const was = poseAfter(pieces.slice(from, to));
+  const now = poseAfter(branch);
+  const dx = now.x - was.x;
+  const dz = now.z - was.z;
+  // Compared flat, and each side made unit length first. The stored
+  // direction points down the hill as well as along it, so its flat part is
+  // shorter than one — and comparing two short vectors reports an angle
+  // between them even when they point exactly the same way.
+  const wasLength = Math.hypot(was.facingX, was.facingZ) || 1;
+  const nowLength = Math.hypot(now.facingX, now.facingZ) || 1;
+  const dot =
+    (was.facingX / wasLength) * (now.facingX / nowLength) +
+    (was.facingZ / wasLength) * (now.facingZ / nowLength);
+  return {
+    apart: Math.sqrt(dx * dx + dz * dz),
+    height: Math.abs(now.y - was.y),
+    facing: (Math.acos(Math.min(1, Math.max(-1, dot))) * 180) / Math.PI,
+  };
+}
+
+/**
+ * How far out a branch may be and still count as rejoining.
+ *
+ * A metre or so of slack is invisible once the floor has width, and asking
+ * for better than that by hand would make a fork impossible to write.
+ */
+export const BRANCH_TOLERANCE = { apart: 1.5, height: 1.5, facing: 8 };
+
+/** Whether a branch comes back to where it left, near enough. */
+export function branchCloses(gap: BranchGap): boolean {
+  return (
+    gap.apart <= BRANCH_TOLERANCE.apart &&
+    gap.height <= BRANCH_TOLERANCE.height &&
+    gap.facing <= BRANCH_TOLERANCE.facing
+  );
+}
+
+/**
  * Works out the other way down, and where the choice is made.
  *
  * The alternative is the main course with a stretch of it swapped out, so
@@ -207,11 +292,14 @@ function branchOf(
   const to = Math.round(number(branch.to, -1, 0, pieces.length));
   if (from < 0 || to <= from || to > pieces.length) return {};
 
-  const altPieces = [
-    ...pieces.slice(0, from),
-    ...branch.pieces.map(pieceFromStored),
-    ...pieces.slice(to),
-  ];
+  const detour = branch.pieces.map(pieceFromStored);
+
+  // A branch that does not come back is not a branch. Rather than putting a
+  // second finish somewhere off in a field, it is simply not used: the
+  // course plays as though it had never been written.
+  if (!branchCloses(branchGap(pieces, detour, from, to))) return {};
+
+  const altPieces = [...pieces.slice(0, from), ...detour, ...pieces.slice(to)];
   // The choice is made where the two ways part company.
   const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
   return { altPieces, forkAt };

@@ -278,10 +278,12 @@ export interface Settings {
   invertPush: boolean;
   /** Shows your best run alongside you as you go. Off unless asked for. */
   ghost: boolean;
+  /** Shows the buttons that throw the ball's weight about. */
+  leanButtons: boolean;
 }
 
 export function defaultSettings(): Settings {
-  return { zoom: 1, richGraphics: true, sound: true, invertPush: false, ghost: false };
+  return { zoom: 1, richGraphics: true, sound: true, invertPush: false, ghost: false, leanButtons: false };
 }
 
 export function loadSettings(): Settings {
@@ -299,6 +301,7 @@ export function loadSettings(): Settings {
       sound: parsed.sound ?? fallback.sound,
       invertPush: parsed.invertPush ?? fallback.invertPush,
       ghost: parsed.ghost ?? fallback.ghost,
+      leanButtons: parsed.leanButtons ?? fallback.leanButtons,
     };
   } catch {
     return defaultSettings();
