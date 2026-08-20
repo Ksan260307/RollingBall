@@ -247,6 +247,332 @@
         }
       ],
       "inGame": true
+    },
+    {
+      "id": "gale",
+      "name": "かぜの台地",
+      "blurb": "さえぎるものが ない ひらけた 台地。横風に もっていかれないように。",
+      "difficulty": 2,
+      "inGame": true,
+      "mood": {
+        "sky": "#9ec9e8",
+        "horizon": "#e6f2fa",
+        "ground": "#b9a97c",
+        "floor": "#efe6cf",
+        "edge": "#ff9f4a",
+        "fog": 210
+      },
+      "breeze": 0.95,
+      "seed": 7714002,
+      "targetSeconds": 26,
+      "pieces": [
+        {
+          "length": 10,
+          "drop": 9,
+          "width": 12,
+          "walls": true,
+          "wind": 0
+        },
+        {
+          "length": 18,
+          "drop": 4,
+          "width": 16,
+          "wind": 1
+        },
+        {
+          "length": 16,
+          "turn": 18,
+          "drop": 3,
+          "width": 15,
+          "wind": 1
+        },
+        {
+          "length": 12,
+          "drop": 6,
+          "width": 11,
+          "walls": true,
+          "wind": 0.2
+        },
+        {
+          "length": 20,
+          "turn": -22,
+          "drop": 3,
+          "width": 16,
+          "wind": 1
+        },
+        {
+          "length": 16,
+          "drop": 4,
+          "width": 14,
+          "wind": 1
+        },
+        {
+          "length": 14,
+          "turn": 16,
+          "drop": 5,
+          "width": 12,
+          "wind": 0.5
+        },
+        {
+          "length": 12,
+          "drop": 7,
+          "width": 11,
+          "walls": true,
+          "wind": 0
+        }
+      ]
+    },
+    {
+      "id": "switchback",
+      "name": "つづら折り",
+      "blurb": "細い道が 右へ 左へ。大きな ボールでは 曲がりきれません。",
+      "difficulty": 3,
+      "inGame": true,
+      "mood": {
+        "sky": "#f6d7b0",
+        "horizon": "#fdeedd",
+        "ground": "#6f7d5c",
+        "floor": "#dcd6c6",
+        "edge": "#e2574c",
+        "fog": 150
+      },
+      "breeze": 0,
+      "seed": 3390711,
+      "targetSeconds": 30,
+      "pieces": [
+        {
+          "length": 10,
+          "drop": 10,
+          "width": 7,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": -62,
+          "drop": 7,
+          "width": 5.5,
+          "bank": -10,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": 66,
+          "drop": 7,
+          "width": 5.5,
+          "bank": 10,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": -70,
+          "drop": 7,
+          "width": 5,
+          "bank": -12,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": 68,
+          "drop": 7,
+          "width": 5,
+          "bank": 12,
+          "walls": true
+        },
+        {
+          "length": 10,
+          "drop": 5,
+          "width": 6,
+          "walls": true,
+          "surface": "rough"
+        },
+        {
+          "length": 12,
+          "turn": -64,
+          "drop": 8,
+          "width": 5.5,
+          "bank": -10,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": 60,
+          "drop": 8,
+          "width": 5.5,
+          "bank": 10,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "drop": 6,
+          "width": 7,
+          "walls": true
+        }
+      ]
+    },
+    {
+      "id": "runout",
+      "name": "ひとおしの坂",
+      "blurb": "はじめの 坂で もらった いきおいだけで、ながい 平らを わたります。",
+      "difficulty": 2,
+      "inGame": true,
+      "mood": {
+        "sky": "#cbb8f0",
+        "horizon": "#f0e9ff",
+        "ground": "#5c6b8a",
+        "floor": "#e4e8f5",
+        "edge": "#6ee7d0",
+        "fog": 200
+      },
+      "breeze": 0,
+      "seed": 9182736,
+      "targetSeconds": 24,
+      "pieces": [
+        {
+          "length": 14,
+          "drop": 24,
+          "width": 9,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "drop": 22,
+          "width": 9,
+          "walls": true
+        },
+        {
+          "length": 10,
+          "drop": 12,
+          "width": 9,
+          "walls": true
+        },
+        {
+          "length": 16,
+          "drop": 2,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 18,
+          "turn": 14,
+          "drop": 1,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 18,
+          "drop": 1,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 16,
+          "turn": -12,
+          "drop": 2,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "drop": 3,
+          "width": 10,
+          "walls": true
+        }
+      ]
+    },
+    {
+      "id": "fork",
+      "name": "ふたまたの谷",
+      "blurb": "とちゅうで 道が わかれます。ひだりは 細い ちかみち、みぎは ながい 安全な道。",
+      "difficulty": 3,
+      "inGame": true,
+      "mood": {
+        "sky": "#7fd6c4",
+        "horizon": "#e3fbf5",
+        "ground": "#4f7a63",
+        "floor": "#e9f2ee",
+        "edge": "#ffb703",
+        "fog": 175
+      },
+      "breeze": 0,
+      "seed": 5150422,
+      "targetSeconds": 20,
+      "pieces": [
+        {
+          "length": 12,
+          "drop": 9,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "drop": 7,
+          "width": 15,
+          "walls": true
+        },
+        {
+          "length": 16,
+          "turn": 24,
+          "drop": 6,
+          "width": 11,
+          "bank": 6,
+          "walls": true
+        },
+        {
+          "length": 16,
+          "turn": -18,
+          "drop": 6,
+          "width": 11,
+          "bank": -4,
+          "walls": true
+        },
+        {
+          "length": 16,
+          "turn": 14,
+          "drop": 6,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "drop": 7,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "drop": 7,
+          "width": 10,
+          "walls": true
+        }
+      ],
+      "branch": {
+        "from": 2,
+        "to": 5,
+        "pieces": [
+          {
+            "length": 10,
+            "turn": -26,
+            "drop": 13,
+            "width": 3.2,
+            "walls": true
+          },
+          {
+            "length": 12,
+            "turn": -6,
+            "drop": 14,
+            "width": 2.8,
+            "walls": true,
+            "surface": "slick"
+          },
+          {
+            "length": 10,
+            "turn": 18,
+            "drop": 12,
+            "width": 3.4,
+            "walls": true
+          }
+        ]
+      }
     }
   ]
 }

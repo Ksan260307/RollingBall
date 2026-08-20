@@ -123,6 +123,7 @@ export class BallEditor {
   private readonly noticeRow: HTMLElement;
   private readonly fileInput: HTMLInputElement;
   private saveHandler: ((design: BallDesign) => void) | null = null;
+  private shareHandler: (() => void) | null = null;
   private closeHandler: (() => void) | null = null;
 
   private watcher: ResizeObserver | null = null;
@@ -214,6 +215,7 @@ export class BallEditor {
               { class: 'tool-row' },
               button(TEXT.choosePhoto, () => this.fileInput.click()),
               button(TEXT.removePhoto, () => this.clearPhoto(), 'ghost'),
+              button(TEXT.recipeButton, () => this.shareHandler?.()),
             ),
             slider(TEXT.photoStrength, 0, 1, 0.05, this.design.photoStrength, (value) => {
               this.design.photoStrength = value;
@@ -580,6 +582,37 @@ export class BallEditor {
 
   onSave(handler: (design: BallDesign) => void): void {
     this.saveHandler = handler;
+  }
+
+  /** Called when the player asks to keep or hand on the ball. */
+  onShare(handler: () => void): void {
+    this.shareHandler = handler;
+  }
+
+  /**
+   * Puts a ball from a recipe on the workbench.
+   *
+   * The photo is left alone: a recipe never carries one, and throwing away
+   * the picture somebody had on their ball would be a surprise.
+   */
+  takeRecipe(recipe: {
+    voxels: Uint8Array;
+    mixed: string[];
+    shine: number;
+    weightAt: { sideways: number; up: number };
+  }): void {
+    this.rememberForUndo();
+    this.design.voxels = Uint8Array.from(recipe.voxels);
+    this.design.mixed = [...recipe.mixed];
+    this.design.shine = recipe.shine;
+    this.design.weightAt = { ...recipe.weightAt };
+    this.colour = 5;
+    this.mixing = false;
+    this.rebuild();
+    this.buildPalette();
+    this.buildMixer();
+    this.showWeight();
+    this.refreshReadout();
   }
 
   onClose(handler: () => void): void {

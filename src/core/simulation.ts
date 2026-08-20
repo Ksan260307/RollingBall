@@ -15,7 +15,7 @@
  * knows that a screen exists.
  */
 
-import { Course, PointFlag, Surface, placeOnCourse } from './course';
+import { Course, type Placement, PointFlag, Surface, placeOnCourse } from './course';
 import { ONE, abs, clamp, div, length3, mul, sign, sine } from './fixed';
 import {
   Triple,
@@ -122,13 +122,50 @@ const EDGE_CLEARANCE = Math.round(0.15 * ONE);
 const RECOVERY_HOLD = Math.round(0.7 * STEPS_PER_SECOND);
 
 /**
- * How long the ball may get nowhere before the run is called off.
+ * How long the ball may get nowhere before anybody is told about it.
+ *
+ * Slowing to a crawl at the top of a rise, or nudging along a wall, happens
+ * constantly and comes right on its own. Counting from the first moment
+ * would put a countdown on the screen every few seconds for something that
+ * was never going wrong.
+ */
+/**
+ * How hard throwing your weight about pushes the ball, per unit of speed.
+ *
+ * This is not steering. Steering turns the ball by gripping the floor;
+ * leaning moves the weight inside the ball and lets the ball follow it
+ * over. Two things make it a different thing to use rather than a second
+ * helping of the same one: the weight takes time to get across and time to
+ * come back, so a lean is a commitment; and holding one costs smoothness,
+ * because weight held out to one side is weight going round unevenly.
+ */
+const LEAN_PUSH = Math.round(0.011 * ONE);
+
+/** How quickly the weight can be thrown from one side to the other. */
+const LEAN_EASE = Math.round(0.06 * ONE);
+
+/** How much a held lean unsettles the run, as a share of a full lean. */
+const LEAN_UNSETTLES = Math.round(0.5 * ONE);
+
+/** How far past the split the choice stays open, in stored metres. */
+const FORK_WINDOW = Math.round(6 * ONE);
+
+/** How far left of the middle counts as having chosen the other way. */
+const FORK_SHARE = Math.round(0.25 * ONE);
+
+const STALL_GRACE = 3 * STEPS_PER_SECOND;
+
+/**
+ * How long the count runs once it has started.
  *
  * A ball that is too knobbly, or wedged against a wall, or simply out of
- * hill, will otherwise sit there for ever. Ten seconds of no progress ends
- * it, and the player watches the count so they know what is happening.
+ * hill, will otherwise sit there for ever. The player watches the count so
+ * they know what is happening.
  */
-const STALL_LIMIT = 10 * STEPS_PER_SECOND;
+const STALL_COUNT = 10 * STEPS_PER_SECOND;
+
+/** Getting nowhere for this long altogether ends the run. */
+const STALL_LIMIT = STALL_GRACE + STALL_COUNT;
 
 /** How much further along the course counts as actually getting somewhere. */
 const PROGRESS_STEP = Math.round(1.0 * ONE);
@@ -388,6 +425,17 @@ export interface WorldOptions {
   ball: ShapeStats;
   /** How breezy the course is, from 0 to ONE. */
   breeze?: number;
+  /**
+   * A second way down, joining the first at both ends.
+   *
+   * It is a whole course in its own right that happens to share its start
+   * and its finish with the main one, which is what keeps everything that
+   * reads a course — the physics, the drawing, the replay — working on it
+   * without knowing there is a choice at all.
+   */
+  alt?: Course | null;
+  /** How far along the fork is, in metres from the start line. */
+  forkAt?: number;
   /** How many players share the course. Solo play uses one. */
   players?: number;
   /** How long the ball is held before the run starts, in seconds. */
@@ -436,6 +484,23 @@ export class World {
   readonly feel: BallFeel;
   readonly players: number;
   readonly breeze: number;
+  /** The other way down, or nothing where the course does not fork. */
+  readonly alt: Course | null;
+  /** Where the choice is made, in stored units from the start line. */
+  readonly forkAt: number;
+  /**
+   * Which way round each player is going: 0 for the main course, 1 for the
+   * other one. Part of the world, so it is wound back with everything else.
+   */
+  readonly route: Uint8Array;
+  /**
+   * Where each player is holding the weight, from -ONE to ONE.
+   *
+   * Eased rather than snapped: a weight has to be got moving and got back
+   * again, and being able to flick it from side to side instantly would
+   * make it a better steering wheel than the steering wheel.
+   */
+  readonly lean: Int32Array;
   readonly scenery: EntityStore;
   readonly surroundings: Surroundings;
   readonly grid: SpatialGrid;
@@ -487,6 +552,8 @@ export class World {
 
   constructor(options: WorldOptions) {
     this.course = options.course;
+    this.alt = options.alt ?? null;
+    this.forkAt = Math.round((options.forkAt ?? 0) * ONE);
     this.seed = options.seed >>> 0;
     this.feel = ballFeelFrom(options.ball);
     this.players = Math.min(MAX_PLAYERS, Math.max(1, options.players ?? 1));
@@ -516,6 +583,8 @@ export class World {
     this.falls = new Int32Array(slots);
     this.recovering = new Int32Array(slots);
     this.bumpPhase = new Int32Array(slots);
+    this.route = new Uint8Array(slots);
+    this.lean = new Int32Array(slots);
     this.stallCountdown = new Int32Array(slots).fill(STALL_LIMIT);
     this.progressMark = new Int32Array(slots);
     this.hint = new Int32Array(slots);
@@ -569,7 +638,7 @@ export class World {
    * about the run alone: the clock, the falls so far, the scenery.
    */
   private returnToStart(player: number): void {
-    const c = this.course;
+    const c = this.courseFor(player);
     const offset =
       this.players > 1 ? Math.round((player - (this.players - 1) / 2) * 1.6 * ONE) : 0;
     const lift = this.feel.radius;
@@ -678,8 +747,9 @@ export class World {
 
   /** How far along the course a player is, from 0 to ONE. */
   progressFor(player = 0): number {
-    if (this.course.totalLength <= 0) return 0;
-    return clamp(div(this.travelled[player], this.course.totalLength), 0, ONE);
+    const total = this.courseFor(player).totalLength;
+    if (total <= 0) return 0;
+    return clamp(div(this.travelled[player], total), 0, ONE);
   }
 
   /** Current speed in metres per second, as a stored value. */
@@ -699,7 +769,7 @@ export class World {
   skidFor(player = 0): number {
     if (!this.grounded[player]) return 0;
     const point = this.hintFor(player);
-    const c = this.course;
+    const c = this.courseFor(player);
     slipInto(
       slipScratch,
       this.velocityX[player],
@@ -721,14 +791,49 @@ export class World {
     return this.hint[player];
   }
 
-  /** Seconds left before a ball that is getting nowhere ends the run. */
+  /**
+   * Seconds left on the count, or the full count while still in the grace.
+   *
+   * The grace is not part of what the player is shown: as far as the screen
+   * is concerned the count starts at ten and runs to nothing.
+   */
   stallSecondsFor(player = 0): number {
-    return this.stallCountdown[player] / STEPS_PER_SECOND;
+    const left = Math.min(this.stallCountdown[player], STALL_COUNT);
+    return Math.max(0, left) / STEPS_PER_SECOND;
   }
 
-  /** True once the ball has been getting nowhere long enough to say so. */
+  /**
+   * True once the count has actually started.
+   *
+   * Not while the grace is still running: nothing is shown then, because
+   * nothing has gone wrong yet.
+   */
   isStalling(player = 0): boolean {
-    return this.stallCountdown[player] < STALL_LIMIT - STEPS_PER_SECOND;
+    return this.stallCountdown[player] < STALL_COUNT;
+  }
+
+  /** The course this player is going round. */
+  courseFor(player = 0): Course {
+    return this.route[player] === 1 && this.alt ? this.alt : this.course;
+  }
+
+  /**
+   * Sends the player down whichever way they are pointed at the fork.
+   *
+   * The other way always leaves to the left, so the rule is simply "are you
+   * on the left of the road as you reach the split". Nothing has to be
+   * pressed, and it can be seen coming: the two ways are both drawn, and
+   * steering onto one is choosing it.
+   *
+   * The choice is only open for a short stretch. After that the ball is
+   * committed, which is what stops it flickering between two floors that
+   * are no longer anywhere near each other.
+   */
+  private chooseRoute(player: number, where: Placement): void {
+    if (!this.alt || this.route[player] === 1) return;
+    if (this.forkAt <= 0) return;
+    if (where.travelled < this.forkAt || where.travelled > this.forkAt + FORK_WINDOW) return;
+    if (where.sideways < -mul(where.halfWidth, FORK_SHARE)) this.route[player] = 1;
   }
 
   /** The progress marks, for taking a copy of the world. */
@@ -779,8 +884,28 @@ export class World {
 
   private moveBall(player: number, packed: number): void {
     const controls = unpackControls(packed);
-    const c = this.course;
-    const where = placeOnCourse(c, this.x[player], this.y[player], this.z[player], this.hint[player]);
+
+    // The weight takes a moment to get across and a moment to come back.
+    const wanted = clamp(controls.lean ?? 0, -ONE, ONE);
+    const towards = wanted - this.lean[player];
+    const step = mul(abs(towards), LEAN_EASE) + 1;
+    this.lean[player] += towards > 0 ? Math.min(step, towards) : Math.max(-step, towards);
+
+    const first = this.courseFor(player);
+    let where = placeOnCourse(
+      first,
+      this.x[player],
+      this.y[player],
+      this.z[player],
+      this.hint[player],
+    );
+    // At the fork, whichever way the ball is pointed becomes the way it goes.
+    this.chooseRoute(player, where);
+    const c = this.courseFor(player);
+    if (c !== first) {
+      this.hint[player] = 0;
+      where = placeOnCourse(c, this.x[player], this.y[player], this.z[player], 0);
+    }
     this.hint[player] = where.point;
     const i = where.point;
 
@@ -844,7 +969,7 @@ export class World {
     }
 
     // A breeze crossing the course, read straight from the surroundings.
-    if (this.breeze > 0) {
+    if (this.breeze > 0 && where.wind > 0) {
       const alongCell = div(where.travelled, Math.round(2 * ONE));
       const acrossFraction = div(
         where.sideways + where.halfWidth,
@@ -855,7 +980,14 @@ export class World {
         clamp(alongCell, 0, (this.surroundings.along - 1) * ONE),
         clamp(acrossCell, 0, (this.surroundings.across - 1) * ONE),
       );
-      const nudge = mul(mul(BREEZE_PUSH, this.breeze), clamp(gust, -ONE, ONE));
+      // A push, not an acceleration: the same wind moves a light ball a
+      // long way and a heavy one hardly at all. This is what makes weight
+      // worth having on an exposed course.
+      const strength = mul(this.breeze, where.wind);
+      const nudge = div(
+        mul(mul(BREEZE_PUSH, strength), clamp(gust, -ONE, ONE)),
+        Math.max(1, this.feel.weight),
+      );
       accelX += mul(rightX, nudge);
       accelY += mul(rightY, nudge);
       accelZ += mul(rightZ, nudge);
@@ -1112,7 +1244,7 @@ export class World {
     upZ: number,
     travelled: number,
   ): void {
-    if (this.feel.veer <= 0) return;
+    if (this.feel.veer <= 0 && this.lean[player] === 0) return;
     const speed = this.speedFor(player);
     if (speed <= BUMP_FLOOR) return;
 
@@ -1134,7 +1266,12 @@ export class World {
     const phase = div(travelled, VEER_WAVELENGTH) & 0xffff;
     const swing = sine(phase);
 
-    const push = mul(mul(mul(VEER_PUSH, this.feel.veer), speed), swing);
+    // What the shape does on its own, plus whatever the player is throwing
+    // about on purpose. A steady lean can be held against a shape that
+    // pulls, which is how an awkward ball is kept honest.
+    const push =
+      mul(mul(mul(VEER_PUSH, this.feel.veer), speed), swing) +
+      mul(mul(LEAN_PUSH, -this.lean[player]), speed);
     this.velocityX[player] += mul(sideX, push);
     this.velocityY[player] += mul(sideY, push);
     this.velocityZ[player] += mul(sideZ, push);
@@ -1154,7 +1291,7 @@ export class World {
    */
   private turnUnevenly(player: number, travelled: number): void {
     const feel = this.feel;
-    if (feel.surge <= 0 && feel.spinSpread <= 0) return;
+    if (feel.surge <= 0 && feel.spinSpread <= 0 && this.lean[player] === 0) return;
     const speed = this.speedFor(player);
     if (speed <= BUMP_FLOOR) return;
 
@@ -1163,7 +1300,16 @@ export class World {
     const roll = Math.max(1, mul(feel.radius, TURN_DISTANCE));
     const turn = div(travelled, roll) & 0xffff;
 
+    const thrown = abs(this.lean[player]);
     let along = 0;
+    if (thrown > 0) {
+      // Weight held out to one side is weight going round unevenly, exactly
+      // as if the ball had been built that way.
+      along += mul(
+        mul(mul(SURGE_PUSH, mul(LEAN_UNSETTLES, thrown)), speed),
+        sine(turn),
+      );
+    }
     if (feel.surge > 0) {
       // The weight falling and climbing, once per turn.
       along += mul(mul(mul(SURGE_PUSH, feel.surge), speed), sine(turn));
@@ -1204,7 +1350,7 @@ export class World {
 
   private settleAgainstWalls(player: number, hasWalls: boolean): void {
     if (!hasWalls) return;
-    const c = this.course;
+    const c = this.courseFor(player);
     const after = placeOnCourse(c, this.x[player], this.y[player], this.z[player], this.hint[player]);
     const i = after.point;
     const limit = after.halfWidth - this.feel.radius;
@@ -1247,7 +1393,7 @@ export class World {
   }
 
   private judge(player: number): void {
-    const c = this.course;
+    const c = this.courseFor(player);
     const where = placeOnCourse(c, this.x[player], this.y[player], this.z[player], this.hint[player]);
     this.hint[player] = where.point;
     this.travelled[player] = where.travelled;
@@ -1439,6 +1585,8 @@ export interface Snapshot {
   recovering: Int32Array;
   bumpPhase: Int32Array;
   stallCountdown: Int32Array;
+  route: Uint8Array;
+  lean: Int32Array;
   progressMark: Int32Array;
   scenery: EntityStore;
   surroundings: Surroundings;
@@ -1473,6 +1621,8 @@ export function capture(world: World): Snapshot {
     recovering: world.recovering.slice(),
     bumpPhase: world.bumpPhase.slice(),
     stallCountdown: world.stallCountdown.slice(),
+    route: world.route.slice(),
+    lean: world.lean.slice(),
     progressMark: world.saveProgressMarks(),
     scenery,
     surroundings,
@@ -1506,6 +1656,8 @@ export function rewind(world: World, snapshot: Snapshot): void {
   world.recovering.set(snapshot.recovering);
   world.bumpPhase.set(snapshot.bumpPhase);
   world.stallCountdown.set(snapshot.stallCountdown);
+  world.route.set(snapshot.route);
+  world.lean.set(snapshot.lean);
   world.loadProgressMarks(snapshot.progressMark);
   snapshot.scenery.copyTo(world.scenery);
   snapshot.surroundings.copyTo(world.surroundings);

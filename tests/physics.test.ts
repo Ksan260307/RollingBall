@@ -701,3 +701,61 @@ describe('hitting a railing', () => {
     expect(world.falls[0]).toBe(0);
   });
 });
+
+describe('the grace before the count starts', () => {
+  const fullBrake = packControls({ steer: 0, push: -ONE, buttons: 0 });
+
+  function parkedWorld(): World {
+    return new World({
+      course: buildCourse([{ length: 60, drop: 8, width: 10, walls: true }]),
+      seed: 5,
+      ball: measureShape(defaultShape()),
+      countdownSeconds: 0,
+    });
+  }
+
+  it('says nothing for the first three seconds of getting nowhere', () => {
+    // Crawling over the top of a rise, or nudging a wall, happens all the
+    // time and comes right on its own. Putting a countdown on the screen
+    // for that would be crying wolf every few seconds.
+    const world = parkedWorld();
+    for (let i = 0; i < STEPS_PER_SECOND * 2.5; i++) world.advance([fullBrake]);
+    expect(world.isStalling(0)).toBe(false);
+    expect(world.stallSecondsFor(0)).toBeCloseTo(10, 1);
+  });
+
+  it('starts the count at ten once the grace has run out', () => {
+    const world = parkedWorld();
+    for (let i = 0; i < STEPS_PER_SECOND * 4; i++) world.advance([fullBrake]);
+    expect(world.isStalling(0)).toBe(true);
+    // A second into the count, near enough.
+    expect(world.stallSecondsFor(0)).toBeLessThan(10);
+    expect(world.stallSecondsFor(0)).toBeGreaterThan(8);
+  });
+
+  it('gives the whole ten seconds of count, after the grace', () => {
+    const world = parkedWorld();
+    let steps = 0;
+    let counting = 0;
+    while (world.state[0] === RunState.Rolling && steps < STEPS_PER_SECOND * 40) {
+      world.advance([fullBrake]);
+      if (world.isStalling(0)) counting++;
+      steps++;
+    }
+    expect(world.state[0]).toBe(RunState.Stuck);
+    // Ten seconds with a count on screen, and three before it without.
+    expect(counting / STEPS_PER_SECOND).toBeGreaterThan(9.5);
+    expect(counting / STEPS_PER_SECOND).toBeLessThan(10.5);
+    expect(steps / STEPS_PER_SECOND).toBeGreaterThan(12);
+  });
+
+  it('forgets the whole thing the moment the ball gets going again', () => {
+    const world = parkedWorld();
+    for (let i = 0; i < STEPS_PER_SECOND * 5; i++) world.advance([fullBrake]);
+    expect(world.isStalling(0)).toBe(true);
+    // Let it go, and it should get its grace back along with everything else.
+    for (let i = 0; i < STEPS_PER_SECOND * 4; i++) world.advance([NEUTRAL]);
+    expect(world.isStalling(0)).toBe(false);
+    expect(world.stallSecondsFor(0)).toBeCloseTo(10, 1);
+  });
+});

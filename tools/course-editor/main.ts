@@ -265,6 +265,90 @@ function numberField(
   return el('label', {}, el('span', { text: label }), input);
 }
 
+/**
+ * The fork: which stretches are replaced, and by what.
+ *
+ * A branch is written as "instead of stretches 2 to 5, go this way", so it
+ * is an edit to the course rather than a second course to keep in step.
+ * Keeping left at the split takes the branch; keeping right stays on the
+ * main line.
+ */
+function branchPanel(course: StoredCourse): HTMLElement {
+  const has = !!course.branch;
+  const rows: HTMLElement[] = [
+    tickField('わかれ道を つくる', has, (value) => {
+      if (value) {
+        course.branch = course.branch ?? {
+          from: Math.min(2, course.pieces.length - 1),
+          to: Math.min(course.pieces.length, 4),
+          pieces: [{ length: 12, drop: 12, width: 3, walls: true }],
+        };
+      } else {
+        delete course.branch;
+      }
+      renderAll();
+    }),
+  ];
+
+  if (course.branch) {
+    const branch = course.branch;
+    rows.push(
+      el(
+        'div',
+        { class: 'grid3' },
+        numberField('どこから（つなぎ番号）', branch.from, 1, (value) => {
+          branch.from = Math.max(0, Math.round(value));
+          refreshPreview();
+        }),
+        numberField('どこまで（この番号は含まない）', branch.to, 1, (value) => {
+          branch.to = Math.max(0, Math.round(value));
+          refreshPreview();
+        }),
+        numberField('わかれ道の つなぎ数', branch.pieces.length, 1, (value) => {
+          const wanted = Math.max(1, Math.min(12, Math.round(value)));
+          while (branch.pieces.length > wanted) branch.pieces.pop();
+          while (branch.pieces.length < wanted) {
+            branch.pieces.push({ length: 12, drop: 10, width: 4, walls: true });
+          }
+          renderAll();
+        }),
+      ),
+    );
+    branch.pieces.forEach((piece, index) => {
+      rows.push(
+        el(
+          'div',
+          { class: 'grid3' },
+          numberField(`わかれ${index + 1} 長さ m`, piece.length, 1, (value) => {
+            piece.length = value;
+            refreshPreview();
+          }),
+          numberField('曲がり °', piece.turn ?? 0, 1, (value) => {
+            piece.turn = value;
+            refreshPreview();
+          }),
+          numberField('下り °', piece.drop ?? 0, 1, (value) => {
+            piece.drop = value;
+            refreshPreview();
+          }),
+          numberField('幅 m', piece.width ?? 4, 0.2, (value) => {
+            piece.width = value;
+            refreshPreview();
+          }),
+        ),
+      );
+    });
+    rows.push(
+      el('p', {
+        class: 'note',
+        text: 'ひだりに よると わかれ道、みぎに よると 本線です。ふたつの道は 合流しません（それぞれの ゴールに つきます）。',
+      }),
+    );
+  }
+
+  return el('div', { class: 'branch-panel' }, el('h2', { text: 'わかれ道' }), ...rows);
+}
+
 /** A plain yes/no switch. */
 function tickField(
   label: string,
@@ -345,6 +429,7 @@ function renderCourseFields(): HTMLElement {
       course.inGame = value;
       renderAll();
     }),
+    branchPanel(course),
     el(
       'div',
       { class: 'grid3' },
@@ -502,6 +587,11 @@ function renderPieces(): HTMLElement {
         numberField('傾き °', piece.bank ?? 0, 1, (value) => {
           piece.bank = value;
           refreshPreview();
+        }),
+        // How exposed this stretch is. Nothing written means fully exposed,
+        // which is how every course behaved before there was a choice.
+        numberField('風あたり 0-1', piece.wind ?? 1, 0.1, (value) => {
+          piece.wind = Math.min(1, Math.max(0, value));
         }),
       ),
       el(

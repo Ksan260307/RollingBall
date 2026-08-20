@@ -54,6 +54,15 @@ export interface CoursePiece {
   walls?: boolean;
   /** Whether the floor is missing here. */
   gap?: boolean;
+  /**
+   * How exposed to the wind this stretch is, from 0 to 1.
+   *
+   * Missing counts as fully exposed, so a course written before there was
+   * any choice in the matter behaves exactly as it did. Sheltered stretches
+   * let a course be windy in places rather than all the way down, which is
+   * what makes a heavy ball worth taking somewhere and not everywhere.
+   */
+  wind?: number;
 }
 
 /**
@@ -88,6 +97,8 @@ export interface Course {
   readonly distance: Int32Array;
   /** What the floor is made of here. */
   readonly surface: Uint8Array;
+  /** How exposed to the wind this point is, from 0 to ONE. */
+  readonly wind: Int32Array;
   /** The extra properties listed in PointFlag. */
   readonly flags: Uint8Array;
   /** Total length of the course. */
@@ -119,6 +130,7 @@ export function buildCourse(pieces: CoursePiece[], startHeight = 0): Course {
   const banks: number[] = [];
   const halfWidths: number[] = [];
   const surfaces: number[] = [];
+  const winds: number[] = [];
   const flagList: number[] = [];
 
   let x = 0;
@@ -133,6 +145,7 @@ export function buildCourse(pieces: CoursePiece[], startHeight = 0): Course {
     bank: number,
     surface: number,
     flags: number,
+    wind: number,
   ): void => {
     px.push(x);
     py.push(y);
@@ -141,6 +154,7 @@ export function buildCourse(pieces: CoursePiece[], startHeight = 0): Course {
     banks.push(degrees(bank));
     halfWidths.push(metres(width / 2));
     surfaces.push(surface);
+    winds.push(wind);
     flagList.push(flags);
   };
 
@@ -152,6 +166,8 @@ export function buildCourse(pieces: CoursePiece[], startHeight = 0): Course {
     const drop = degrees(piece.drop ?? 0);
     const turnPerStep = degrees((piece.turn ?? 0) / steps);
     const surface = piece.surface ?? Surface.Normal;
+    // Missing counts as fully exposed, so older courses are unchanged.
+    const wind = metres(Math.min(1, Math.max(0, piece.wind ?? 1)));
     let flags = 0;
     if (piece.walls) flags |= PointFlag.Walls;
     if (piece.gap) flags |= PointFlag.Gap;
@@ -163,7 +179,7 @@ export function buildCourse(pieces: CoursePiece[], startHeight = 0): Course {
       const blend = s < blendSteps ? (s + 1) / (blendSteps + 1) : 1;
       const easedWidth = previousWidth + (width - previousWidth) * blend;
       const easedBank = previousBank + (bank - previousBank) * blend;
-      push(easedWidth, easedBank, surface, flags);
+      push(easedWidth, easedBank, surface, flags, wind);
 
       heading = (heading + turnPerStep) & 0xffff;
       const forwardFlat = cosine(drop);
@@ -180,7 +196,7 @@ export function buildCourse(pieces: CoursePiece[], startHeight = 0): Course {
   }
 
   // One last point so the final stretch has somewhere to lead to.
-  push(previousWidth, previousBank, Surface.Normal, PointFlag.Finish);
+  push(previousWidth, previousBank, Surface.Normal, PointFlag.Finish, 0);
   const finishIndex = px.length - 1;
   // The last few points count as the finish area, so the ball can trip the
   // line without having to reach the very last centimetre.
@@ -207,6 +223,7 @@ export function buildCourse(pieces: CoursePiece[], startHeight = 0): Course {
     halfWidth: Int32Array.from(halfWidths),
     distance: new Int32Array(count),
     surface: Uint8Array.from(surfaces),
+    wind: Int32Array.from(winds),
     flags: Uint8Array.from(flagList),
     totalLength: 0,
     startX: px[0],
@@ -296,6 +313,8 @@ export interface Placement {
   pastEnd: number;
   /** What the floor is made of there. */
   surface: number;
+  /** How exposed to the wind the ball is there, from 0 to ONE. */
+  wind: number;
   /** The extra properties of that stretch. */
   flags: number;
 }
@@ -309,6 +328,7 @@ const placement: Placement = {
   travelled: 0,
   pastEnd: 0,
   surface: 0,
+  wind: 0,
   flags: 0,
 };
 
@@ -369,6 +389,7 @@ export function placeOnCourse(
   placement.pastEnd =
     travelled < 0 ? -travelled : travelled > course.totalLength ? travelled - course.totalLength : 0;
   placement.surface = course.surface[point];
+  placement.wind = course.wind[point];
   placement.flags = course.flags[point];
   return placement;
 }

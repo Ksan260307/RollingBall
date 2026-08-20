@@ -25,9 +25,33 @@ export interface Controls {
   push: number;
   /** The switches listed in Button. */
   buttons: number;
+  /**
+   * Which way the weight inside the ball is being thrown, in the same unit.
+   *
+   * Nothing counts as the middle, which is what a run recorded before there
+   * was any such thing says, so an old replay plays back exactly as it did.
+   */
+  lean?: number;
 }
 
-export const NEUTRAL: Controls = { steer: 0, push: 0, buttons: 0 };
+export const NEUTRAL: Controls = { steer: 0, push: 0, buttons: 0, lean: 0 };
+
+/**
+ * The lean, stored so that nothing means the middle.
+ *
+ * The other two are stored with the middle at 128, which would turn the
+ * empty top byte of every run recorded so far into a hard lean to one side.
+ */
+function toLeanByte(value: number): number {
+  const clamped = value < -65536 ? -65536 : value > 65536 ? 65536 : value;
+  return Math.round((clamped * 127) / 65536) & 0xff;
+}
+
+function fromLeanByte(value: number): number {
+  // Back to a signed number, so an empty byte reads as the middle.
+  const signed = ((value & 0xff) << 24) >> 24;
+  return Math.round((signed * 65536) / 127);
+}
 
 function toByte(value: number): number {
   // -65536..65536 squeezed into -127..127, then stored without a sign bit.
@@ -46,7 +70,8 @@ export function packControls(controls: Controls): number {
   return (
     ((toByte(controls.steer) & 0xff) |
       ((toByte(controls.push) & 0xff) << 8) |
-      ((controls.buttons & 0xff) << 16)) >>>
+      ((controls.buttons & 0xff) << 16) |
+      (toLeanByte(controls.lean ?? 0) << 24)) >>>
     0
   );
 }
@@ -57,6 +82,7 @@ export function unpackControls(packed: number): Controls {
     steer: fromByte(packed & 0xff),
     push: fromByte((packed >>> 8) & 0xff),
     buttons: (packed >>> 16) & 0xff,
+    lean: fromLeanByte((packed >>> 24) & 0xff),
   };
 }
 

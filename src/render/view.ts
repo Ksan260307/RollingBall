@@ -140,6 +140,8 @@ export class GameView {
   readonly camera: PerspectiveCamera;
 
   private courseMesh: Group | null = null;
+  /** The other way down, where the course forks. Drawn so it can be chosen. */
+  private altMesh: Group | null = null;
   private ballGroup = new Group();
   private ballMesh: Mesh | null = null;
   private ballMaterial: MeshStandardMaterial | null = null;
@@ -301,7 +303,7 @@ export class GameView {
   }
 
   /** Swaps in a new course and its colours. */
-  setStage(stage: Stage, course: Course): void {
+  setStage(stage: Stage, course: Course, alt: Course | null = null): void {
     this.edgeColour = stage.mood.edge;
     this.trailTint.set(stage.mood.edge);
     this.clearTrail();
@@ -315,6 +317,22 @@ export class GameView {
       ground: stage.mood.ground,
     });
     this.scene.add(this.courseMesh);
+
+    // Both ways down are drawn. A choice you cannot see coming is not a
+    // choice, it is a trap.
+    if (this.altMesh) {
+      this.scene.remove(this.altMesh);
+      disposeCourseMesh(this.altMesh);
+      this.altMesh = null;
+    }
+    if (alt) {
+      this.altMesh = buildCourseMesh(alt, {
+        floor: stage.mood.floor,
+        edge: stage.mood.edge,
+        ground: stage.mood.ground,
+      });
+      this.scene.add(this.altMesh);
+    }
 
     const skyMaterial = this.sky.material as MeshBasicMaterial;
     skyMaterial.map?.dispose();
@@ -952,6 +970,7 @@ export class GameView {
   dispose(): void {
     this.watcher?.disconnect();
     if (this.courseMesh) disposeCourseMesh(this.courseMesh);
+    if (this.altMesh) disposeCourseMesh(this.altMesh);
     this.renderer.dispose();
   }
 }

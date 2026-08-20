@@ -15,8 +15,13 @@
 import { CoursePiece, Surface, SurfaceValue, buildCourse, type Course } from '../core/course';
 import { ONE } from '../core/fixed';
 import courseData from './courses.json';
+import { dailyCourse } from './daily';
 
 export interface Stage {
+  /** The other way down, where the course forks. */
+  altPieces?: CoursePiece[];
+  /** How far along the choice is made, in metres. */
+  forkAt?: number;
   id: string;
   name: string;
   blurb: string;
@@ -41,6 +46,22 @@ export interface Stage {
 }
 
 /** What a course looks like in the file, before anything is filled in. */
+/**
+ * A second way down, swapped in for part of the main course.
+ *
+ * Written as "from this stretch to that one, go this way instead", so a
+ * fork is a small edit to a course rather than a whole second course to
+ * keep in step with the first.
+ */
+export interface StoredBranch {
+  /** The first stretch replaced, counting from zero. */
+  from: number;
+  /** The first stretch that is not replaced. */
+  to: number;
+  /** What to go through instead. */
+  pieces: StoredPiece[];
+}
+
 export interface StoredCourse {
   /** Whether the course appears in the game. Missing counts as yes. */
   inGame?: boolean;
@@ -54,6 +75,8 @@ export interface StoredCourse {
   seed: number;
   targetSeconds: number;
   pieces: StoredPiece[];
+  /** A second way down, where the course offers a choice. */
+  branch?: StoredBranch;
 }
 
 /** One stretch as it appears in the file. */
@@ -66,6 +89,7 @@ export interface StoredPiece {
   surface?: SurfaceName;
   walls?: boolean;
   gap?: boolean;
+  wind?: number;
 }
 
 /** Floor materials, named rather than numbered so the file stays readable. */
@@ -132,6 +156,9 @@ export function pieceFromStored(stored: StoredPiece): CoursePiece {
     surface: SURFACE_BY_NAME[name],
     walls: stored.walls === true,
     gap: stored.gap === true,
+    // Nothing said means fully exposed, which is how every course behaved
+    // before there was any choice about it.
+    wind: number(stored.wind, 1, 0, 1),
   };
 }
 
@@ -139,6 +166,8 @@ export function pieceFromStored(stored: StoredPiece): CoursePiece {
 export function stageFromStored(stored: StoredCourse, index: number): Stage {
   const mood = (stored.mood ?? {}) as Partial<StoredCourse['mood']>;
   const pieces = Array.isArray(stored.pieces) ? stored.pieces : [];
+  const built =
+    pieces.length > 0 ? pieces.map(pieceFromStored) : [pieceFromStored({ length: 40 })];
   return {
     id: text(stored.id, `course-${index + 1}`),
     name: text(stored.name, `コース ${index + 1}`),
@@ -155,8 +184,37 @@ export function stageFromStored(stored: StoredCourse, index: number): Stage {
     breeze: Math.round(number(stored.breeze, COURSE_DEFAULTS.breeze, 0, 1) * ONE),
     seed: Math.round(number(stored.seed, index + 1, 0, 0xffffffff)),
     targetSeconds: number(stored.targetSeconds, COURSE_DEFAULTS.targetSeconds, 1, 600),
-    pieces: pieces.length > 0 ? pieces.map(pieceFromStored) : [pieceFromStored({ length: 40 })],
+    pieces: built,
+    ...branchOf(stored, built),
   };
+}
+
+/**
+ * Works out the other way down, and where the choice is made.
+ *
+ * The alternative is the main course with a stretch of it swapped out, so
+ * both ways share everything before the fork and everything after the join.
+ * A branch that names stretches which are not there is quietly dropped:
+ * half a fork on the screen would be worse than none.
+ */
+function branchOf(
+  stored: StoredCourse,
+  pieces: CoursePiece[],
+): { altPieces?: CoursePiece[]; forkAt?: number } {
+  const branch = stored.branch;
+  if (!branch || !Array.isArray(branch.pieces) || branch.pieces.length === 0) return {};
+  const from = Math.round(number(branch.from, -1, 0, pieces.length));
+  const to = Math.round(number(branch.to, -1, 0, pieces.length));
+  if (from < 0 || to <= from || to > pieces.length) return {};
+
+  const altPieces = [
+    ...pieces.slice(0, from),
+    ...branch.pieces.map(pieceFromStored),
+    ...pieces.slice(to),
+  ];
+  // The choice is made where the two ways part company.
+  const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
+  return { altPieces, forkAt };
 }
 
 /** Every course in the file, ready to play. */
@@ -168,9 +226,13 @@ export function stageFromStored(stored: StoredCourse, index: number): Stage {
  * it turning up in the game. Anything that does not say either way counts
  * as in, so a hand-written file needs no extra ceremony.
  */
-export const STAGES: Stage[] = ((courseData as { courses?: StoredCourse[] }).courses ?? [])
-  .filter((course) => course?.inGame !== false)
-  .map(stageFromStored);
+export const STAGES: Stage[] = [
+  ...((courseData as { courses?: StoredCourse[] }).courses ?? [])
+    .filter((course) => course?.inGame !== false)
+    .map(stageFromStored),
+  // The day's course goes last, so the hand-made ones keep their order.
+  stageFromStored(dailyCourse(), 99),
+];
 
 /** Every course in the file, in it or not, for the editor to list. */
 export const ALL_COURSES: StoredCourse[] =
@@ -192,6 +254,17 @@ export function courseFor(stage: Stage): Course {
   if (existing) return existing;
   const course = buildCourse(stage.pieces, 0);
   built.set(stage.id, course);
+  return course;
+}
+
+/** The other way down, where the course forks, or nothing where it does not. */
+export function altCourseFor(stage: Stage): Course | null {
+  if (!stage.altPieces || stage.altPieces.length === 0) return null;
+  const key = `${stage.id}~alt`;
+  const existing = built.get(key);
+  if (existing) return existing;
+  const course = buildCourse(stage.altPieces, 0);
+  built.set(key, course);
   return course;
 }
 

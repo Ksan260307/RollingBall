@@ -15,7 +15,7 @@ import { Session, type SessionOptions } from './game/session';
 import { Playback } from './game/playback';
 import { Ghost } from './game/ghost';
 import { demoControls } from './game/demoDriver';
-import { STAGES, Stage, courseFor } from './game/stages';
+import { STAGES, Stage, altCourseFor, courseFor } from './game/stages';
 import type { Course } from './core/course';
 import {
   BallDesign,
@@ -35,6 +35,8 @@ import { Sounds } from './audio/sound';
 import { GameView } from './render/view';
 import { ControlReader } from './ui/controls';
 import { BallEditor } from './ui/editor';
+import { SharePanel } from './ui/share';
+import { readRecipe, recipeFromLink } from './game/recipe';
 import { Hud } from './ui/hud';
 import { Screens, ScreenName } from './ui/screens';
 import { button, el } from './ui/dom';
@@ -108,6 +110,31 @@ function main(): void {
     }
   };
   const editor = new BallEditor(design);
+
+  /**
+   * Keeping a ball and handing one on.
+   *
+   * Reading a recipe can fail — it may be a scribble, or something from a
+   * newer version — so the answer is always checked before anything on the
+   * workbench is disturbed.
+   */
+  const share = new SharePanel({
+    current: () => editor.currentDesign(),
+    use: (recipe) => {
+      void (async () => {
+        const held = await readRecipe(recipe.trim().includes('?ball=')
+          ? decodeURIComponent(recipeFromLink(recipe.slice(recipe.indexOf('?'))) ?? '')
+          : recipe);
+        if (!held) {
+          share.say(TEXT.recipeUnreadable);
+          return;
+        }
+        editor.takeRecipe(held);
+        share.say(TEXT.recipeLoaded);
+      })();
+    },
+  });
+  editor.onShare(() => share.open());
 
   const screens = new Screens(
     {
@@ -183,6 +210,39 @@ function main(): void {
     button('II', () => pause(), 'round'),
   );
 
+  /**
+   * The two buttons that throw the ball's weight about.
+   *
+   * Held rather than tapped, so they sit low on either side where a thumb
+   * already is and do not fight the drag that steers.
+   */
+  function leanButton(label: string, way: number): HTMLElement {
+    const node = button(label, () => {}, 'round');
+    const press = (event: PointerEvent): void => {
+      controls.leanButton = way;
+      node.classList.add('is-held');
+      node.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    };
+    const release = (): void => {
+      if (controls.leanButton === way) controls.leanButton = 0;
+      node.classList.remove('is-held');
+    };
+    node.addEventListener('pointerdown', press);
+    node.addEventListener('pointerup', release);
+    node.addEventListener('pointercancel', release);
+    node.addEventListener('pointerleave', release);
+    return node;
+  }
+
+  const leanTools = el(
+    'div',
+    { class: 'lean-tools is-hidden' },
+    leanButton('◀', -1),
+    el('span', { class: 'lean-label', text: TEXT.leanLabel }),
+    leanButton('▶', 1),
+  );
+
   // The controls that sit over a replay: where from, how fast, and out.
   const replayClock = el('span', { class: 'replay-clock', text: '0.00' });
   const speedButton = button('×1', () => {
@@ -219,9 +279,11 @@ function main(): void {
   const ui = el(
     'div',
     { class: 'ui' },
+    share.root,
     screens.root,
     hud.root,
     tools,
+    leanTools,
     replayFlag,
     replayBar,
     editor.root,
@@ -234,6 +296,7 @@ function main(): void {
   screens.setStages(records);
   hud.setVisible(false);
   tools.classList.add('is-hidden');
+  leanTools.classList.add('is-hidden');
 
   editor.onClose(() => {
     editor.close();
@@ -263,6 +326,8 @@ function main(): void {
     if (!playing) sounds.quieten();
     hud.setVisible(playing);
     tools.classList.toggle('is-hidden', !playing);
+    leanTools.classList.toggle('is-hidden', !playing);
+    if (!playing) controls.leanButton = 0;
     controls.enabled = playing;
     if (!playing) controls.reset();
   }
@@ -279,6 +344,7 @@ function main(): void {
     screens.show('none');
     hud.setVisible(false);
     tools.classList.add('is-hidden');
+    leanTools.classList.add('is-hidden');
     controls.enabled = false;
     canvas.classList.add('is-hidden');
     editor.root.classList.add('is-showing');
@@ -294,7 +360,7 @@ function main(): void {
     view.clearBreakthrough();
     view.cameraStyle = 'chase';
     const course = courseFor(stage);
-    view.setStage(stage, course);
+    view.setStage(stage, course, altCourseFor(stage));
     session = new Session({
       stage,
       course,
@@ -320,7 +386,7 @@ function main(): void {
     sounds.quieten();
     view.clearBreakthrough();
     view.hideGhost();
-    view.setStage(currentStage, lastRun.options.course);
+    view.setStage(currentStage, lastRun.options.course, altCourseFor(currentStage));
     playback = new Playback(lastRun.options, lastRun.controls);
     replayHold = 0;
     view.prepareScenery(playback.session.world);
@@ -329,6 +395,7 @@ function main(): void {
     screens.show('none');
     hud.setVisible(false);
     tools.classList.add('is-hidden');
+    leanTools.classList.add('is-hidden');
     controls.enabled = false;
     replayBar.classList.remove('is-hidden');
     replayFlag.classList.remove('is-hidden');
@@ -401,7 +468,7 @@ function main(): void {
     view.clearBreakthrough();
     view.cameraStyle = 'chase';
     const stage = STAGES[0];
-    view.setStage(stage, courseFor(stage));
+    view.setStage(stage, courseFor(stage), altCourseFor(stage));
     demo = new Session({
       stage,
       course: courseFor(stage),
@@ -592,6 +659,20 @@ function main(): void {
       }
     }
     requestAnimationFrame(frame);
+  }
+
+  // A ball handed over by address: open the workbench with it already there
+  // rather than quietly replacing whatever the player had made.
+  const handed = recipeFromLink(window.location.search);
+  if (handed) {
+    void (async () => {
+      const held = await readRecipe(decodeURIComponent(handed));
+      if (!held) return;
+      openEditor();
+      editor.takeRecipe(held);
+      // Take it out of the address, so a reload does not do this again.
+      window.history.replaceState(null, '', window.location.pathname);
+    })();
   }
 
   startDemo();

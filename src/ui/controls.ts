@@ -70,6 +70,8 @@ export class ControlReader {
   invertPush = false;
   /** Turned off while a menu is open. */
   enabled = true;
+  /** Which way the weight is being thrown by an on-screen button, -1 to 1. */
+  leanButton = 0;
 
   constructor(element: HTMLElement) {
     this.element = element;
@@ -212,6 +214,11 @@ export class ControlReader {
     if (this.keys.has('arrowup') || this.keys.has('w')) push += 1;
     if (this.keys.has('arrowdown') || this.keys.has('s')) push -= 1;
 
+    // Throwing the weight about is its own axis, on its own keys.
+    let lean = this.leanButton;
+    if (this.keys.has('q')) lean -= 1;
+    if (this.keys.has('e')) lean += 1;
+
     steer = clampUnit(steer);
     push = clampUnit(this.invertPush ? -push : push);
 
@@ -219,6 +226,7 @@ export class ControlReader {
       steer: Math.round(steer * ONE),
       push: Math.round(push * ONE),
       buttons: 0,
+      lean: Math.round(clampUnit(lean) * ONE),
       active: this.dragging,
       reach: FULL_PUSH_PIXELS,
       originX: this.originX,

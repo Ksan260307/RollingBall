@@ -23,7 +23,7 @@ import {
   rewind,
   type Snapshot,
 } from '../core/simulation';
-import { Stage } from './stages';
+import { Stage, altCourseFor } from './stages';
 
 /** One step, in seconds. */
 export const STEP_SECONDS = 1 / STEPS_PER_SECOND;
@@ -55,6 +55,8 @@ export class Session {
     this.stage = options.stage;
     this.world = new World({
       course: options.course,
+      alt: altCourseFor(options.stage),
+      forkAt: options.stage.forkAt,
       seed: options.stage.seed,
       ball: options.ball,
       breeze: options.stage.breeze,

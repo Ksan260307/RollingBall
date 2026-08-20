@@ -19,6 +19,7 @@ import {
   pieceFromStored,
   stageFromStored,
 } from '../src/game/stages';
+import { isDaily } from '../src/game/daily';
 import { runWithAutopilot } from './helpers/autopilot';
 
 const raw = JSON.parse(readFileSync('src/game/courses.json', 'utf8')) as {
@@ -26,10 +27,13 @@ const raw = JSON.parse(readFileSync('src/game/courses.json', 'utf8')) as {
 };
 
 describe('the course file', () => {
-  it('holds every course the game offers', () => {
+  it('holds every course the game offers, bar the one made from the date', () => {
+    // The day's course is generated rather than written down, so it is in
+    // the game without being in the file. Everything else comes from here.
     expect(raw.courses.length).toBeGreaterThan(0);
-    expect(raw.courses.length).toBe(STAGES.length);
-    expect(raw.courses.map((course) => course.id)).toEqual(STAGES.map((stage) => stage.id));
+    const fromFile = STAGES.filter((stage) => !isDaily(stage.id));
+    expect(fromFile.map((stage) => stage.id)).toEqual(raw.courses.map((course) => course.id));
+    expect(STAGES.filter((stage) => isDaily(stage.id))).toHaveLength(1);
   });
 
   it('uses names for the floor rather than numbers, so it reads plainly', () => {
@@ -176,9 +180,9 @@ describe('parking a course instead of deleting it', () => {
     for (const course of off) {
       expect(STAGES.some((stage) => stage.id === course.id)).toBe(false);
     }
-    // And everything else is in.
+    // And everything else is in, alongside the one made from the date.
     const on = raw.courses.filter((course) => course.inGame !== false);
-    expect(STAGES).toHaveLength(on.length);
+    expect(STAGES.filter((stage) => !isDaily(stage.id))).toHaveLength(on.length);
   });
 
   it('treats a course that says nothing as one that is in', () => {
@@ -191,6 +195,5 @@ describe('parking a course instead of deleting it', () => {
 
   it('no longer carries the course that was made and then dropped', () => {
     expect(raw.courses.some((course) => course.id === 'course-4')).toBe(false);
-    expect(STAGES).toHaveLength(3);
   });
 });

@@ -17,7 +17,7 @@ import { ONE } from '../core/fixed';
 import { RunState, World } from '../core/simulation';
 import type { Course } from '../core/course';
 import type { ShapeStats } from '../core/ballShape';
-import type { Stage } from './stages';
+import { type Stage, altCourseFor } from './stages';
 
 /** How far apart the marks are along the course, in metres. */
 const MARK_METRES = 1;
@@ -58,6 +58,8 @@ export class Ghost {
     this.controls = controls;
     this.world = new World({
       course: options.course,
+      alt: altCourseFor(options.stage),
+      forkAt: options.stage.forkAt,
       seed: options.stage.seed,
       ball: options.ball,
       breeze: options.stage.breeze,
@@ -116,6 +118,8 @@ export class Ghost {
   private readMarks(options: GhostOptions): number[] {
     const world = new World({
       course: options.course,
+      alt: altCourseFor(options.stage),
+      forkAt: options.stage.forkAt,
       seed: options.stage.seed,
       ball: options.ball,
       breeze: options.stage.breeze,

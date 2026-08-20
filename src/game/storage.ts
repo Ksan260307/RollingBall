@@ -29,6 +29,59 @@ const RECORDS_KEY = 'rollingball.records.v1';
 const BALL_KEY = 'rollingball.ball.v1';
 const SETTINGS_KEY = 'rollingball.settings.v1';
 const GHOST_KEY = 'rollingball.best-runs.v1';
+const SHELF_KEY = 'rollingball.recipes.v1';
+
+/** How many balls can be kept on the shelf at once. */
+export const SHELF_LIMIT = 24;
+
+/** One ball put away under a name. */
+export interface KeptBall {
+  name: string;
+  recipe: string;
+}
+
+/** The balls that have been put away, newest first. */
+export function loadShelf(): KeptBall[] {
+  const raw = readStore(SHELF_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (one): one is KeptBall =>
+          typeof one === 'object' &&
+          one !== null &&
+          typeof (one as KeptBall).name === 'string' &&
+          typeof (one as KeptBall).recipe === 'string',
+      )
+      .slice(0, SHELF_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Puts a ball away under a name.
+ *
+ * A name already on the shelf is written over rather than doubled up, which
+ * is what somebody means when they save the same ball twice.
+ */
+export function keepBall(name: string, recipe: string): KeptBall[] {
+  const tidy = name.trim().slice(0, 24) || 'ボール';
+  const shelf = loadShelf().filter((one) => one.name !== tidy);
+  shelf.unshift({ name: tidy, recipe });
+  const kept = shelf.slice(0, SHELF_LIMIT);
+  writeStore(SHELF_KEY, JSON.stringify(kept));
+  return kept;
+}
+
+/** Takes a ball off the shelf. */
+export function dropBall(name: string): KeptBall[] {
+  const kept = loadShelf().filter((one) => one.name !== name);
+  writeStore(SHELF_KEY, JSON.stringify(kept));
+  return kept;
+}
 
 /**
  * A best run is kept so it can be raced against.
@@ -223,12 +276,12 @@ export interface Settings {
   sound: boolean;
   /** Swaps which way dragging up and down works. */
   invertPush: boolean;
-  /** Shows your best run alongside you as you go. */
+  /** Shows your best run alongside you as you go. Off unless asked for. */
   ghost: boolean;
 }
 
 export function defaultSettings(): Settings {
-  return { zoom: 1, richGraphics: true, sound: true, invertPush: false, ghost: true };
+  return { zoom: 1, richGraphics: true, sound: true, invertPush: false, ghost: false };
 }
 
 export function loadSettings(): Settings {

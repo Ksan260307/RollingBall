@@ -1409,3 +1409,196 @@ body {
   border-left-color: var(--accent);
 }
 
+
+/*
+ * Keeping a ball, and handing one on.
+ *
+ * Sits over the workbench rather than beside it: it is a thing you go and
+ * do, not a thing you keep half an eye on while building.
+ */
+.share-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pad);
+  background: rgba(6, 9, 16, 0.72);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  z-index: 5;
+  overflow-y: auto;
+}
+
+.share-panel.is-hidden {
+  display: none;
+}
+
+.share-inner {
+  width: min(460px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: clamp(16px, 4vw, 26px);
+  border-radius: calc(var(--radius) + 8px);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.share-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.share-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  flex: 1 1 auto;
+}
+
+.share-inner h3 {
+  margin: 6px 0 0;
+  font-size: 0.95rem;
+}
+
+.share-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--ink-soft);
+}
+
+.share-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.share-row .button {
+  flex: 1 1 auto;
+}
+
+.share-name {
+  flex: 2 1 160px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.3);
+  color: inherit;
+  font: inherit;
+}
+
+.shelf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.shelf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.shelf-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.shelf-row .button {
+  padding: 7px 12px;
+  font-size: 0.82rem;
+  flex: 0 0 auto;
+}
+
+/* The square itself. White all round it, because a camera needs that. */
+.share-picture {
+  display: flex;
+  justify-content: center;
+  padding: 10px;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.share-picture canvas {
+  display: block;
+  width: min(260px, 62vw);
+  height: auto;
+  /* Cells must stay square-edged, or a camera reads mush. */
+  image-rendering: pixelated;
+}
+
+.share-code {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  resize: vertical;
+  word-break: break-all;
+}
+
+.share-notice {
+  margin: 0;
+  min-height: 1.4em;
+  font-size: 0.85rem;
+  color: var(--accent);
+}
+
+/*
+ * Throwing the ball's weight about.
+ *
+ * Low and to the left, opposite the camera buttons, where a thumb already
+ * rests. Held rather than tapped, so the buttons say so by lighting up.
+ */
+.lean-tools {
+  position: absolute;
+  left: max(var(--pad), env(safe-area-inset-left));
+  bottom: max(var(--pad), env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 200ms ease;
+}
+
+.lean-tools.is-hidden {
+  display: none;
+}
+
+.lean-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.lean-tools .button.is-held {
+  background: rgba(255, 209, 102, 0.3);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* On a narrow screen the label only gets in the way. */
+@media (max-width: 460px) {
+  .lean-label {
+    display: none;
+  }
+}
