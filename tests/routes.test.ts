@@ -12,12 +12,16 @@ import { defaultShape, measureShape, randomShape } from '../src/core/ballShape';
 import { buildCourse } from '../src/core/course';
 import { RunState, World, capture, rewind } from '../src/core/simulation';
 import {
+  BRANCH_TOLERANCE,
   STAGES,
   altCourseFor,
+  branchClearance,
   branchCloses,
   branchGap,
+  branchSpread,
   courseFor,
   pieceFromStored,
+  stageById,
   stageFromStored,
 } from '../src/game/stages';
 import type { StoredCourse } from '../src/game/stages';
@@ -25,9 +29,9 @@ import type { StoredCourse } from '../src/game/stages';
 /**
  * A course with two ways down, built here rather than shipped.
  *
- * No course in the game forks at the moment, but the machinery that makes
- * one work is still there and still has to keep working, so the test brings
- * its own.
+ * The game does ship one — the valley with the fork in it — but these tests
+ * are about the machinery rather than that particular course, so they bring
+ * their own and stay true whatever anybody draws later.
  */
 const forkStage = stageFromStored(
   {
@@ -318,5 +322,101 @@ describe('deciding whether a fork actually rejoins', () => {
     );
     expect(stage.altPieces).toBeUndefined();
     expect(altCourseFor(stage)).toBeNull();
+  });
+});
+
+/**
+ * A fork you cannot see is not a fork.
+ *
+ * The first one written looked perfect on paper — it closed to within a
+ * centimetre — and on screen there was one road, because the branch ran
+ * straight down the middle of the stretch it was supposed to be an
+ * alternative to. Closing is only half of what makes a fork; being
+ * somewhere else is the other half, and it is checked here.
+ */
+describe('two ways you can actually tell apart', () => {
+  it('keeps the fork in the game clear of the road it leaves', () => {
+    const stage = stageById('fork');
+    expect(stage).toBeDefined();
+    if (!stage?.altPieces) throw new Error('the fork course lost its branch');
+
+    // The branch is the middle of the other way: shared start, own stretch,
+    // shared finish. It is the own stretch that has to be somewhere else.
+    const detour = stage.altPieces.slice(2, stage.altPieces.length - 2);
+    expect(branchClearance(stage.pieces, detour, 2, 8)).toBeGreaterThan(
+      BRANCH_TOLERANCE.clearance,
+    );
+    // And far enough away to be a choice rather than a wobble.
+    expect(branchSpread(stage.pieces, detour, 2, 8)).toBeGreaterThan(8);
+  });
+
+  it('is genuinely the shorter way round', () => {
+    const stage = stageById('fork');
+    if (!stage) throw new Error('the fork course went missing');
+    const main = courseFor(stage);
+    const other = altCourseFor(stage);
+    expect(other).not.toBeNull();
+    expect(other!.totalLength).toBeLessThan(main.totalLength);
+  });
+
+  it('knows where the two ways part and where they meet again', () => {
+    const stage = stageById('fork');
+    if (!stage) throw new Error('the fork course went missing');
+    const other = altCourseFor(stage)!;
+    expect(stage.forkAt).toBeGreaterThan(0);
+    expect(stage.rejoinAt).toBeGreaterThan(stage.forkAt ?? 0);
+    // The rejoin is measured along the other way, which is the shorter one.
+    expect(stage.rejoinAt!).toBeLessThan(other.totalLength / ONE);
+  });
+
+  it('turns down a branch laid on top of the road it left', () => {
+    // Straight on, exactly where the main course already is. It closes
+    // perfectly, because it is the same line — and it is invisible.
+    const pieces = [
+      { length: 12, drop: 9, width: 10, walls: true },
+      { length: 12, drop: 8, width: 10, walls: true },
+      { length: 16, drop: 7, width: 10, walls: true },
+      { length: 16, drop: 7, width: 10, walls: true },
+      { length: 14, drop: 8, width: 10, walls: true },
+    ];
+    const onTop = [
+      { length: 16, drop: 7, width: 6, walls: true },
+      { length: 16, drop: 7, width: 6, walls: true },
+    ];
+    // It does come back to the right place.
+    expect(branchCloses(branchGap(pieces, onTop, 2, 4))).toBe(true);
+    // And it is still not a fork.
+    expect(branchClearance(pieces, onTop, 2, 4)).toBeLessThan(BRANCH_TOLERANCE.clearance);
+
+    const stage = stageFromStored(
+      {
+        ...(forkStage as unknown as StoredCourse),
+        id: 'buried-fork',
+        pieces,
+        branch: { from: 2, to: 4, pieces: onTop },
+      } as StoredCourse,
+      0,
+    );
+    expect(stage.altPieces).toBeUndefined();
+  });
+
+  it('allows one way to pass under the other', () => {
+    // Same place on the map, a long way apart in height. That is a bridge,
+    // and it is one of the better things a fork can do.
+    const pieces = [
+      { length: 12, drop: 9, width: 10, walls: true },
+      { length: 12, drop: 8, width: 10, walls: true },
+      { length: 16, drop: 4, width: 10, walls: true },
+      { length: 16, drop: 30, width: 10, walls: true },
+      { length: 14, drop: 8, width: 10, walls: true },
+    ];
+    const underneath = [
+      { length: 16, drop: 30, width: 6, walls: true },
+      { length: 16, drop: 4, width: 6, walls: true },
+    ];
+    expect(branchCloses(branchGap(pieces, underneath, 2, 4))).toBe(true);
+    expect(branchClearance(pieces, underneath, 2, 4)).toBeGreaterThan(
+      BRANCH_TOLERANCE.clearance,
+    );
   });
 });

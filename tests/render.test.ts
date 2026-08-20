@@ -21,7 +21,7 @@ import { WALL_HEIGHT, World } from '../src/core/simulation';
 import { ONE, toNumber } from '../src/core/fixed';
 import { buildCourseMesh, disposeCourseMesh, toMetres } from '../src/render/courseMesh';
 import { buildBallGeometry } from '../src/render/ballMesh';
-import { STAGES, courseFor } from '../src/game/stages';
+import { STAGES, altCourseFor, courseFor, stageById } from '../src/game/stages';
 
 const colours = { floor: '#f2f6e9', edge: '#ffd166', ground: '#7fc98a' };
 
@@ -307,5 +307,66 @@ describe('the railings', () => {
     // It leant on the railing all the way and the railing held.
     expect(hits).toBeGreaterThan(0);
     expect(world.falls[0]).toBe(0);
+  });
+});
+
+/**
+ * Drawing only the stretch that differs, at a fork.
+ *
+ * Both ways down are the same course with a stretch swapped out, so drawing
+ * both of them whole lays two identical floors on top of each other for the
+ * shared start and the shared finish. That does not look like two roads. It
+ * looks like one road tearing itself apart as the camera moves, and it is
+ * exactly what was wrong with the fork course when it first went in.
+ */
+describe('drawing the second way down', () => {
+  it('draws far less of it than the whole course', () => {
+    const stage = stageById('fork');
+    if (!stage) throw new Error('the fork course went missing');
+    const other = altCourseFor(stage);
+    expect(other).not.toBeNull();
+
+    const whole = buildCourseMesh(other!, colours);
+    const part = buildCourseMesh(other!, colours, {
+      from: stage.forkAt ?? 0,
+      to: stage.rejoinAt ?? 0,
+    });
+    expect(countTriangles(part)).toBeLessThan(countTriangles(whole) * 0.6);
+    expect(countTriangles(part)).toBeGreaterThan(0);
+    disposeCourseMesh(whole);
+    disposeCourseMesh(part);
+  });
+
+  it('keeps every corner of it between the fork and the join', () => {
+    const stage = stageById('fork');
+    if (!stage) throw new Error('the fork course went missing');
+    const other = altCourseFor(stage)!;
+    const from = stage.forkAt ?? 0;
+    const to = stage.rejoinAt ?? 0;
+    const part = buildCourseMesh(other, colours, { from, to });
+
+    // Where the drawn stretch starts and stops, along the ground.
+    let earliest = Number.POSITIVE_INFINITY;
+    let latest = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < other.count; i++) {
+      const along = toMetres(other.distance[i]);
+      if (along < from || along > to) continue;
+      earliest = Math.min(earliest, toMetres(other.z[i]));
+      latest = Math.max(latest, toMetres(other.z[i]));
+    }
+
+    // Nothing drawn may sit outside that, give or take the width of the floor.
+    const room = 12;
+    part.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      const position = child.geometry.getAttribute('position');
+      if (!position) return;
+      for (let i = 0; i < position.count; i++) {
+        const z = position.getZ(i);
+        expect(z).toBeGreaterThan(earliest - room);
+        expect(z).toBeLessThan(latest + room);
+      }
+    });
+    disposeCourseMesh(part);
   });
 });

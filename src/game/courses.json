@@ -1,609 +1,611 @@
 {
-  "courses": [
+ "courses": [
+  {
+   "id": "meadow",
+   "name": "はじまりの丘",
+   "blurb": "幅の広いゆるやかな坂道。まずはここで転がりに慣れよう。",
+   "difficulty": 1,
+   "mood": {
+    "sky": "#8fd3ff",
+    "horizon": "#e8f7ff",
+    "ground": "#7fc98a",
+    "floor": "#f2f6e9",
+    "edge": "#ffd166",
+    "fog": 190
+   },
+   "breeze": 0,
+   "seed": 5351905,
+   "targetSeconds": 18,
+   "pieces": [
     {
-      "id": "meadow",
-      "name": "はじまりの丘",
-      "blurb": "幅の広いゆるやかな坂道。まずはここで転がりに慣れよう。",
-      "difficulty": 1,
-      "mood": {
-        "sky": "#8fd3ff",
-        "horizon": "#e8f7ff",
-        "ground": "#7fc98a",
-        "floor": "#f2f6e9",
-        "edge": "#ffd166",
-        "fog": 190
-      },
-      "breeze": 0,
-      "seed": 5351905,
-      "targetSeconds": 18,
-      "pieces": [
-        {
-          "length": 12,
-          "drop": 6,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 14,
-          "turn": -20,
-          "drop": 7,
-          "width": 9,
-          "bank": -5,
-          "walls": true
-        },
-        {
-          "length": 16,
-          "turn": 26,
-          "drop": 7,
-          "width": 9,
-          "bank": 6,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "drop": 9,
-          "width": 8
-        },
-        {
-          "length": 14,
-          "turn": -16,
-          "drop": 6,
-          "width": 8,
-          "bank": -4,
-          "walls": true
-        },
-        {
-          "length": 10,
-          "drop": 5,
-          "width": 8,
-          "surface": "boost"
-        },
-        {
-          "length": 12,
-          "turn": 14,
-          "drop": 7,
-          "width": 9,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "drop": 4,
-          "width": 10,
-          "walls": true
-        }
-      ],
-      "inGame": true
+     "length": 12,
+     "drop": 6,
+     "width": 10,
+     "walls": true
     },
     {
-      "id": "valley",
-      "name": "風わたる谷",
-      "blurb": "すべりやすい路面と横風。カーブのふくらみに気をつけて。",
-      "difficulty": 2,
-      "mood": {
-        "sky": "#5a7fd6",
-        "horizon": "#ffd9a8",
-        "ground": "#3f6b7d",
-        "floor": "#dfeaf5",
-        "edge": "#7ce0ff",
-        "fog": 150
-      },
-      "breeze": 0.55,
-      "seed": 2914227,
-      "targetSeconds": 17,
-      "pieces": [
-        {
-          "length": 10,
-          "drop": 8,
-          "width": 8,
-          "walls": true
-        },
-        {
-          "length": 14,
-          "turn": 30,
-          "drop": 7,
-          "width": 7,
-          "bank": 9,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "drop": 6,
-          "width": 6,
-          "surface": "slick"
-        },
-        {
-          "length": 16,
-          "turn": -34,
-          "drop": 7,
-          "width": 7,
-          "bank": -10,
-          "walls": true
-        },
-        {
-          "length": 10,
-          "drop": 10,
-          "width": 6,
-          "surface": "slick"
-        },
-        {
-          "length": 12,
-          "turn": 22,
-          "drop": 6,
-          "width": 7,
-          "bank": 7
-        },
-        {
-          "length": 10,
-          "drop": 5,
-          "width": 7,
-          "surface": "boost"
-        },
-        {
-          "length": 12,
-          "turn": -18,
-          "drop": 7,
-          "width": 8,
-          "walls": true
-        },
-        {
-          "length": 8,
-          "drop": 4,
-          "width": 9,
-          "walls": true
-        }
-      ],
-      "inGame": true
+     "length": 14,
+     "turn": -20,
+     "drop": 7,
+     "width": 9,
+     "bank": -5,
+     "walls": true
     },
     {
-      "id": "skyway",
-      "name": "星ふる回廊",
-      "blurb": "細い足場ととぎれた床。いきおいをつけて飛びこえよう。",
-      "difficulty": 3,
-      "mood": {
-        "sky": "#1b1e3d",
-        "horizon": "#6b4fa8",
-        "ground": "#161a33",
-        "floor": "#c9d6ff",
-        "edge": "#ff9de2",
-        "fog": 130
-      },
-      "breeze": 0.3,
-      "seed": 10435845,
-      "targetSeconds": 15,
-      "pieces": [
-        {
-          "length": 10,
-          "drop": 9,
-          "width": 7,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": 18,
-          "drop": 8,
-          "width": 5
-        },
-        {
-          "length": 8,
-          "drop": 3,
-          "width": 5,
-          "surface": "boost"
-        },
-        {
-          "length": 4,
-          "drop": 13,
-          "width": 5,
-          "gap": true
-        },
-        {
-          "length": 12,
-          "turn": -24,
-          "drop": 6,
-          "width": 5,
-          "bank": -8
-        },
-        {
-          "length": 10,
-          "drop": 6,
-          "width": 4,
-          "surface": "rough"
-        },
-        {
-          "length": 8,
-          "drop": 3,
-          "width": 5,
-          "surface": "boost"
-        },
-        {
-          "length": 4,
-          "drop": 13,
-          "width": 5,
-          "gap": true
-        },
-        {
-          "length": 14,
-          "turn": 28,
-          "drop": 7,
-          "width": 6,
-          "bank": 9,
-          "walls": true
-        },
-        {
-          "length": 10,
-          "drop": 6,
-          "width": 5,
-          "surface": "slick"
-        },
-        {
-          "length": 8,
-          "drop": 5,
-          "width": 6
-        },
-        {
-          "length": 10,
-          "drop": 4,
-          "width": 8,
-          "walls": true
-        }
-      ],
-      "inGame": true
+     "length": 16,
+     "turn": 26,
+     "drop": 7,
+     "width": 9,
+     "bank": 6,
+     "walls": true
     },
     {
-      "id": "gale",
-      "name": "かぜの台地",
-      "blurb": "さえぎるものが ない ひらけた 台地。横風に もっていかれないように。",
-      "difficulty": 2,
-      "inGame": true,
-      "mood": {
-        "sky": "#9ec9e8",
-        "horizon": "#e6f2fa",
-        "ground": "#b9a97c",
-        "floor": "#efe6cf",
-        "edge": "#ff9f4a",
-        "fog": 210
-      },
-      "breeze": 0.95,
-      "seed": 7714002,
-      "targetSeconds": 26,
-      "pieces": [
-        {
-          "length": 10,
-          "drop": 9,
-          "width": 12,
-          "walls": true,
-          "wind": 0
-        },
-        {
-          "length": 18,
-          "drop": 4,
-          "width": 16,
-          "wind": 1
-        },
-        {
-          "length": 16,
-          "turn": 18,
-          "drop": 3,
-          "width": 15,
-          "wind": 1
-        },
-        {
-          "length": 12,
-          "drop": 6,
-          "width": 11,
-          "walls": true,
-          "wind": 0.2
-        },
-        {
-          "length": 20,
-          "turn": -22,
-          "drop": 3,
-          "width": 16,
-          "wind": 1
-        },
-        {
-          "length": 16,
-          "drop": 4,
-          "width": 14,
-          "wind": 1
-        },
-        {
-          "length": 14,
-          "turn": 16,
-          "drop": 5,
-          "width": 12,
-          "wind": 0.5
-        },
-        {
-          "length": 12,
-          "drop": 7,
-          "width": 11,
-          "walls": true,
-          "wind": 0
-        }
-      ]
+     "length": 12,
+     "drop": 9,
+     "width": 8
     },
     {
-      "id": "switchback",
-      "name": "つづら折り",
-      "blurb": "細い道が 右へ 左へ。大きな ボールでは 曲がりきれません。",
-      "difficulty": 3,
-      "inGame": true,
-      "mood": {
-        "sky": "#f6d7b0",
-        "horizon": "#fdeedd",
-        "ground": "#6f7d5c",
-        "floor": "#dcd6c6",
-        "edge": "#e2574c",
-        "fog": 150
-      },
-      "breeze": 0,
-      "seed": 3390711,
-      "targetSeconds": 30,
-      "pieces": [
-        {
-          "length": 10,
-          "drop": 10,
-          "width": 7,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": -62,
-          "drop": 7,
-          "width": 5.5,
-          "bank": -10,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": 66,
-          "drop": 7,
-          "width": 5.5,
-          "bank": 10,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": -70,
-          "drop": 7,
-          "width": 5,
-          "bank": -12,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": 68,
-          "drop": 7,
-          "width": 5,
-          "bank": 12,
-          "walls": true
-        },
-        {
-          "length": 10,
-          "drop": 5,
-          "width": 6,
-          "walls": true,
-          "surface": "rough"
-        },
-        {
-          "length": 12,
-          "turn": -64,
-          "drop": 8,
-          "width": 5.5,
-          "bank": -10,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": 60,
-          "drop": 8,
-          "width": 5.5,
-          "bank": 10,
-          "walls": true
-        },
-        {
-          "length": 14,
-          "drop": 6,
-          "width": 7,
-          "walls": true
-        }
-      ]
+     "length": 14,
+     "turn": -16,
+     "drop": 6,
+     "width": 8,
+     "bank": -4,
+     "walls": true
     },
     {
-      "id": "runout",
-      "name": "ひとおしの坂",
-      "blurb": "はじめの 坂で もらった いきおいだけで、ながい 平らを わたります。",
-      "difficulty": 2,
-      "inGame": true,
-      "mood": {
-        "sky": "#cbb8f0",
-        "horizon": "#f0e9ff",
-        "ground": "#5c6b8a",
-        "floor": "#e4e8f5",
-        "edge": "#6ee7d0",
-        "fog": 200
-      },
-      "breeze": 0,
-      "seed": 9182736,
-      "targetSeconds": 24,
-      "pieces": [
-        {
-          "length": 14,
-          "drop": 24,
-          "width": 9,
-          "walls": true
-        },
-        {
-          "length": 14,
-          "drop": 22,
-          "width": 9,
-          "walls": true
-        },
-        {
-          "length": 10,
-          "drop": 12,
-          "width": 9,
-          "walls": true
-        },
-        {
-          "length": 16,
-          "drop": 2,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 18,
-          "turn": 14,
-          "drop": 1,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 18,
-          "drop": 1,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 16,
-          "turn": -12,
-          "drop": 2,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 14,
-          "drop": 3,
-          "width": 10,
-          "walls": true
-        }
-      ]
+     "length": 10,
+     "drop": 5,
+     "width": 8,
+     "surface": "boost"
     },
     {
-      "id": "fork",
-      "name": "ふたまたの谷",
-      "blurb": "とちゅうで 道が わかれます。ひだりは 細い ちかみち、みぎは ながい 安全な道。",
-      "difficulty": 3,
-      "inGame": true,
-      "mood": {
-        "sky": "#7fd6c4",
-        "horizon": "#e3fbf5",
-        "ground": "#4f7a63",
-        "floor": "#e9f2ee",
-        "edge": "#ffb703",
-        "fog": 175
-      },
-      "breeze": 0,
-      "seed": 5150422,
-      "targetSeconds": 20,
-      "pieces": [
-        {
-          "length": 12,
-          "drop": 10,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "drop": 8,
-          "width": 14,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": 86,
-          "drop": 7,
-          "width": 10,
-          "bank": 12,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": 0,
-          "drop": 7,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": -86,
-          "drop": 7,
-          "width": 10,
-          "bank": -12,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": -86,
-          "drop": 7,
-          "width": 10,
-          "bank": -12,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": 0,
-          "drop": 7,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 12,
-          "turn": 86,
-          "drop": 7,
-          "width": 10,
-          "bank": 12,
-          "walls": true
-        },
-        {
-          "length": 14,
-          "drop": 8,
-          "width": 10,
-          "walls": true
-        },
-        {
-          "length": 14,
-          "drop": 8,
-          "width": 10,
-          "walls": true
-        }
-      ],
-      "branch": {
-        "from": 2,
-        "to": 8,
-        "pieces": [
-          {
-            "length": 10,
-            "width": 3.2,
-            "walls": true,
-            "surface": "rough",
-            "drop": 14.94
-          },
-          {
-            "length": 10,
-            "width": 2.8,
-            "walls": true,
-            "surface": "rough",
-            "drop": 14.94
-          },
-          {
-            "length": 8,
-            "width": 6,
-            "walls": true,
-            "surface": "rough",
-            "turn": -1,
-            "drop": 14.94
-          },
-          {
-            "length": 6,
-            "width": 6,
-            "walls": true,
-            "surface": "rough",
-            "turn": 2,
-            "drop": 14.94
-          }
-        ]
-      }
+     "length": 12,
+     "turn": 14,
+     "drop": 7,
+     "width": 9,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "drop": 4,
+     "width": 10,
+     "walls": true
     }
-  ]
+   ],
+   "inGame": true
+  },
+  {
+   "id": "valley",
+   "name": "風わたる谷",
+   "blurb": "すべりやすい路面と横風。カーブのふくらみに気をつけて。",
+   "difficulty": 2,
+   "mood": {
+    "sky": "#5a7fd6",
+    "horizon": "#ffd9a8",
+    "ground": "#3f6b7d",
+    "floor": "#dfeaf5",
+    "edge": "#7ce0ff",
+    "fog": 150
+   },
+   "breeze": 0.55,
+   "seed": 2914227,
+   "targetSeconds": 17,
+   "pieces": [
+    {
+     "length": 10,
+     "drop": 8,
+     "width": 8,
+     "walls": true
+    },
+    {
+     "length": 14,
+     "turn": 30,
+     "drop": 7,
+     "width": 7,
+     "bank": 9,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "drop": 6,
+     "width": 6,
+     "surface": "slick"
+    },
+    {
+     "length": 16,
+     "turn": -34,
+     "drop": 7,
+     "width": 7,
+     "bank": -10,
+     "walls": true
+    },
+    {
+     "length": 10,
+     "drop": 10,
+     "width": 6,
+     "surface": "slick"
+    },
+    {
+     "length": 12,
+     "turn": 22,
+     "drop": 6,
+     "width": 7,
+     "bank": 7
+    },
+    {
+     "length": 10,
+     "drop": 5,
+     "width": 7,
+     "surface": "boost"
+    },
+    {
+     "length": 12,
+     "turn": -18,
+     "drop": 7,
+     "width": 8,
+     "walls": true
+    },
+    {
+     "length": 8,
+     "drop": 4,
+     "width": 9,
+     "walls": true
+    }
+   ],
+   "inGame": true
+  },
+  {
+   "id": "skyway",
+   "name": "星ふる回廊",
+   "blurb": "細い足場ととぎれた床。いきおいをつけて飛びこえよう。",
+   "difficulty": 3,
+   "mood": {
+    "sky": "#1b1e3d",
+    "horizon": "#6b4fa8",
+    "ground": "#161a33",
+    "floor": "#c9d6ff",
+    "edge": "#ff9de2",
+    "fog": 130
+   },
+   "breeze": 0.3,
+   "seed": 10435845,
+   "targetSeconds": 15,
+   "pieces": [
+    {
+     "length": 10,
+     "drop": 9,
+     "width": 7,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": 18,
+     "drop": 8,
+     "width": 5
+    },
+    {
+     "length": 8,
+     "drop": 3,
+     "width": 5,
+     "surface": "boost"
+    },
+    {
+     "length": 4,
+     "drop": 13,
+     "width": 5,
+     "gap": true
+    },
+    {
+     "length": 12,
+     "turn": -24,
+     "drop": 6,
+     "width": 5,
+     "bank": -8
+    },
+    {
+     "length": 10,
+     "drop": 6,
+     "width": 4,
+     "surface": "rough"
+    },
+    {
+     "length": 8,
+     "drop": 3,
+     "width": 5,
+     "surface": "boost"
+    },
+    {
+     "length": 4,
+     "drop": 13,
+     "width": 5,
+     "gap": true
+    },
+    {
+     "length": 14,
+     "turn": 28,
+     "drop": 7,
+     "width": 6,
+     "bank": 9,
+     "walls": true
+    },
+    {
+     "length": 10,
+     "drop": 6,
+     "width": 5,
+     "surface": "slick"
+    },
+    {
+     "length": 8,
+     "drop": 5,
+     "width": 6
+    },
+    {
+     "length": 10,
+     "drop": 4,
+     "width": 8,
+     "walls": true
+    }
+   ],
+   "inGame": true
+  },
+  {
+   "id": "gale",
+   "name": "かぜの台地",
+   "blurb": "さえぎるものが ない ひらけた 台地。横風に もっていかれないように。",
+   "difficulty": 2,
+   "inGame": true,
+   "mood": {
+    "sky": "#9ec9e8",
+    "horizon": "#e6f2fa",
+    "ground": "#b9a97c",
+    "floor": "#efe6cf",
+    "edge": "#ff9f4a",
+    "fog": 210
+   },
+   "breeze": 0.95,
+   "seed": 7714002,
+   "targetSeconds": 26,
+   "pieces": [
+    {
+     "length": 10,
+     "drop": 9,
+     "width": 12,
+     "walls": true,
+     "wind": 0
+    },
+    {
+     "length": 18,
+     "drop": 4,
+     "width": 16,
+     "wind": 1
+    },
+    {
+     "length": 16,
+     "turn": 18,
+     "drop": 3,
+     "width": 15,
+     "wind": 1
+    },
+    {
+     "length": 12,
+     "drop": 6,
+     "width": 11,
+     "walls": true,
+     "wind": 0.2
+    },
+    {
+     "length": 20,
+     "turn": -22,
+     "drop": 3,
+     "width": 16,
+     "wind": 1
+    },
+    {
+     "length": 16,
+     "drop": 4,
+     "width": 14,
+     "wind": 1
+    },
+    {
+     "length": 14,
+     "turn": 16,
+     "drop": 5,
+     "width": 12,
+     "wind": 0.5
+    },
+    {
+     "length": 12,
+     "drop": 7,
+     "width": 11,
+     "walls": true,
+     "wind": 0
+    }
+   ]
+  },
+  {
+   "id": "switchback",
+   "name": "つづら折り",
+   "blurb": "細い道が 右へ 左へ。大きな ボールでは 曲がりきれません。",
+   "difficulty": 3,
+   "inGame": true,
+   "mood": {
+    "sky": "#f6d7b0",
+    "horizon": "#fdeedd",
+    "ground": "#6f7d5c",
+    "floor": "#dcd6c6",
+    "edge": "#e2574c",
+    "fog": 150
+   },
+   "breeze": 0,
+   "seed": 3390711,
+   "targetSeconds": 30,
+   "pieces": [
+    {
+     "length": 10,
+     "drop": 10,
+     "width": 7,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": -62,
+     "drop": 7,
+     "width": 5.5,
+     "bank": -10,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": 66,
+     "drop": 7,
+     "width": 5.5,
+     "bank": 10,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": -70,
+     "drop": 7,
+     "width": 5,
+     "bank": -12,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": 68,
+     "drop": 7,
+     "width": 5,
+     "bank": 12,
+     "walls": true
+    },
+    {
+     "length": 10,
+     "drop": 5,
+     "width": 6,
+     "walls": true,
+     "surface": "rough"
+    },
+    {
+     "length": 12,
+     "turn": -64,
+     "drop": 8,
+     "width": 5.5,
+     "bank": -10,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": 60,
+     "drop": 8,
+     "width": 5.5,
+     "bank": 10,
+     "walls": true
+    },
+    {
+     "length": 14,
+     "drop": 6,
+     "width": 7,
+     "walls": true
+    }
+   ]
+  },
+  {
+   "id": "runout",
+   "name": "ひとおしの坂",
+   "blurb": "はじめの 坂で もらった いきおいだけで、ながい 平らを わたります。",
+   "difficulty": 2,
+   "inGame": true,
+   "mood": {
+    "sky": "#cbb8f0",
+    "horizon": "#f0e9ff",
+    "ground": "#5c6b8a",
+    "floor": "#e4e8f5",
+    "edge": "#6ee7d0",
+    "fog": 200
+   },
+   "breeze": 0,
+   "seed": 9182736,
+   "targetSeconds": 24,
+   "pieces": [
+    {
+     "length": 14,
+     "drop": 24,
+     "width": 9,
+     "walls": true
+    },
+    {
+     "length": 14,
+     "drop": 22,
+     "width": 9,
+     "walls": true
+    },
+    {
+     "length": 10,
+     "drop": 12,
+     "width": 9,
+     "walls": true
+    },
+    {
+     "length": 16,
+     "drop": 2,
+     "width": 10,
+     "walls": true
+    },
+    {
+     "length": 18,
+     "turn": 14,
+     "drop": 1,
+     "width": 10,
+     "walls": true
+    },
+    {
+     "length": 18,
+     "drop": 1,
+     "width": 10,
+     "walls": true
+    },
+    {
+     "length": 16,
+     "turn": -12,
+     "drop": 2,
+     "width": 10,
+     "walls": true
+    },
+    {
+     "length": 14,
+     "drop": 3,
+     "width": 10,
+     "walls": true
+    }
+   ]
+  },
+  {
+   "id": "fork",
+   "name": "ふたまたの谷",
+   "blurb": "みぎは 大まわりの ながい道、ひだりは 下へ もぐる 細い ちかみち。",
+   "difficulty": 3,
+   "inGame": true,
+   "mood": {
+    "sky": "#7fd6c4",
+    "horizon": "#e3fbf5",
+    "ground": "#4f7a63",
+    "floor": "#e9f2ee",
+    "edge": "#ffb703",
+    "fog": 175
+   },
+   "breeze": 0,
+   "seed": 5150422,
+   "targetSeconds": 20,
+   "pieces": [
+    {
+     "length": 12,
+     "drop": 10,
+     "width": 10,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "drop": 8,
+     "width": 14,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": 86,
+     "drop": 7,
+     "width": 10,
+     "walls": true,
+     "bank": 12
+    },
+    {
+     "length": 12,
+     "turn": 0,
+     "drop": 7,
+     "width": 10,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": -86,
+     "drop": 7,
+     "width": 10,
+     "walls": true,
+     "bank": -12
+    },
+    {
+     "length": 12,
+     "turn": -86,
+     "drop": 7,
+     "width": 10,
+     "walls": true,
+     "bank": -12
+    },
+    {
+     "length": 12,
+     "turn": 0,
+     "drop": 7,
+     "width": 10,
+     "walls": true
+    },
+    {
+     "length": 12,
+     "turn": 86,
+     "drop": 7,
+     "width": 10,
+     "walls": true,
+     "bank": 12
+    },
+    {
+     "length": 14,
+     "drop": 8,
+     "width": 10,
+     "walls": true
+    },
+    {
+     "length": 14,
+     "drop": 8,
+     "width": 10,
+     "walls": true
+    }
+   ],
+   "branch": {
+    "from": 2,
+    "to": 8,
+    "pieces": [
+     {
+      "length": 12,
+      "turn": -29,
+      "drop": 14.1,
+      "width": 4.0,
+      "walls": true,
+      "surface": "rough"
+     },
+     {
+      "length": 8,
+      "turn": 26,
+      "drop": 14.1,
+      "width": 3.4,
+      "walls": true,
+      "surface": "rough"
+     },
+     {
+      "length": 8,
+      "turn": 32,
+      "drop": 14.1,
+      "width": 3.4,
+      "walls": true,
+      "surface": "rough"
+     },
+     {
+      "length": 8,
+      "turn": -29,
+      "drop": 14.1,
+      "width": 4.6,
+      "walls": true,
+      "surface": "rough"
+     }
+    ]
+   }
+  }
+ ]
 }

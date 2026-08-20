@@ -351,17 +351,29 @@ export class GameView {
 
     // Both ways down are drawn. A choice you cannot see coming is not a
     // choice, it is a trap.
+    //
+    // Only the stretch that actually differs, though. The other way down is
+    // the same course with a piece swapped out, so before the fork and after
+    // the join it is the very same floor at the very same coordinates — and
+    // two of those in one place do not look like two roads, they look like
+    // one road tearing itself apart as the camera moves.
     if (this.altMesh) {
       this.scene.remove(this.altMesh);
       disposeCourseMesh(this.altMesh);
       this.altMesh = null;
     }
     if (alt) {
-      this.altMesh = buildCourseMesh(alt, {
-        floor: stage.mood.floor,
-        edge: stage.mood.edge,
-        ground: stage.mood.ground,
-      });
+      const forkAt = stage.forkAt ?? 0;
+      const rejoinAt = stage.rejoinAt ?? alt.totalLength / ONE;
+      this.altMesh = buildCourseMesh(
+        alt,
+        {
+          floor: stage.mood.floor,
+          edge: stage.mood.edge,
+          ground: stage.mood.ground,
+        },
+        { from: forkAt, to: rejoinAt },
+      );
       this.scene.add(this.altMesh);
     }
 

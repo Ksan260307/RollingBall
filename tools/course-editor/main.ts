@@ -27,8 +27,14 @@ import {
   WebGLRenderer,
 } from 'three';
 import { type CoursePiece, buildCourse } from '../../src/core/course';
-import { type StoredPiece, branchCloses, branchGap } from '../../src/game/stages';
-import { describeGap, fitBranch } from './fit';
+import {
+  type StoredPiece,
+  BRANCH_TOLERANCE,
+  branchClearance,
+  branchCloses,
+  branchGap,
+} from '../../src/game/stages';
+import { describeClearance, describeGap, fitBranch } from './fit';
 import { toNumber } from '../../src/core/fixed';
 import { defaultShape, measureShape } from '../../src/core/ballShape';
 import { RunState, STEPS_PER_SECOND, World } from '../../src/core/simulation';
@@ -71,6 +77,14 @@ const camera = new PerspectiveCamera(50, 1, 0.5, 4000);
 let renderer: WebGLRenderer | null = null;
 let viewCanvas: HTMLCanvasElement;
 let courseMesh: Group | null = null;
+/**
+ * The other way down, where the course being drawn has one.
+ *
+ * Drawn whether or not it closes yet. An author part way through a fork
+ * needs to see what they are drawing, and a branch that does not close is
+ * exactly the one worth looking at.
+ */
+let branchMesh: Group | null = null;
 let startMarker: Mesh | null = null;
 const focus = new Vector3();
 let orbit = 0.7;
@@ -160,12 +174,33 @@ function refreshPreview(): void {
     scene.remove(courseMesh);
     disposeCourseMesh(courseMesh);
   }
-  courseMesh = buildCourseMesh(course, {
+  const paint = {
     floor: stage.mood.floor,
     edge: stage.mood.edge,
     ground: stage.mood.ground,
-  });
+  };
+  courseMesh = buildCourseMesh(course, paint);
   scene.add(courseMesh);
+
+  // The other way down, drawn only where it differs. Before the fork and
+  // after the join it is the very same floor as the main line, and two of
+  // those in one place look like one road flickering rather than two roads.
+  if (branchMesh) {
+    scene.remove(branchMesh);
+    disposeCourseMesh(branchMesh);
+    branchMesh = null;
+  }
+  const branch = currentCourse().branch;
+  if (branch && Array.isArray(branch.pieces) && branch.pieces.length > 0) {
+    const held = branch.pieces.map(pieceFromStored);
+    const from = Math.max(0, Math.min(stage.pieces.length, Math.round(branch.from)));
+    const to = Math.max(from, Math.min(stage.pieces.length, Math.round(branch.to)));
+    const other = buildCourse([...stage.pieces.slice(0, from), ...held, ...stage.pieces.slice(to)], 0);
+    const forkAt = stage.pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
+    const rejoinAt = forkAt + held.reduce((sum, piece) => sum + piece.length, 0);
+    branchMesh = buildCourseMesh(other, paint, { from: forkAt, to: rejoinAt });
+    scene.add(branchMesh);
+  }
 
   if (startMarker) {
     startMarker.position.set(
@@ -359,10 +394,21 @@ function branchPanel(course: StoredCourse): HTMLElement {
     const detour = branch.pieces.map(pieceFromStored);
     const gap = branchGap(built, detour, branch.from, branch.to);
     const closes = branchCloses(gap);
+    // Closing is half of it. A branch that comes back perfectly but runs
+    // through the middle of the road it left is invisible on screen, so how
+    // far the two ways keep away from each other is shown just as plainly.
+    const clearance = branchClearance(built, detour, branch.from, branch.to);
+    const clears = clearance >= BRANCH_TOLERANCE.clearance;
     rows.push(
       el('p', {
         class: closes ? 'note note-good' : 'note note-bad',
         text: `${closes ? '合流します' : '合流しません（このままでは 本編に出ません）'}： ${describeGap(gap)}`,
+      }),
+      el('p', {
+        class: clears ? 'note note-good' : 'note note-bad',
+        text: clears
+          ? `二本の道は 重なっていません： ${describeClearance(clearance)}`
+          : `二本の道が 重なっています（このままでは 本編に出ません）： ${describeClearance(clearance)}。わかれ道を よこに ずらすか、上下に 離してください`,
       }),
       el(
         'div',

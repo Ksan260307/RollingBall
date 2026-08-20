@@ -18,7 +18,13 @@
  */
 
 import type { CoursePiece } from '../../src/core/course';
-import { type BranchGap, branchCloses, branchGap, poseAfter } from '../../src/game/stages';
+import {
+  type BranchGap,
+  branchClearance,
+  branchCloses,
+  branchGap,
+  poseAfter,
+} from '../../src/game/stages';
 
 /** How the closing stretches are allowed to look. */
 const TURN_RANGE = 120;
@@ -41,6 +47,16 @@ export interface FitResult {
   pieces: CoursePiece[];
   /** What is left of the gap once it is closed as well as it can be. */
   gap: BranchGap;
+  /**
+   * How much daylight is left between the two ways down, at their closest.
+   *
+   * Not something the search can chase — working it out means building both
+   * courses, and the search tries thousands of shapes. It is measured once
+   * at the end and reported, because a branch that closes perfectly and
+   * runs straight through the middle of the road it left is not a fork, and
+   * the author is the one who can move it.
+   */
+  clearance: number;
 }
 
 /**
@@ -67,6 +83,12 @@ export function fitBranch(
   // is asking for a corner nobody can take.
   const width = Math.max(6, drawn[drawn.length - 1].width ?? 4);
   const limit = comfortableTurn(width);
+
+  // The closing stretches start out sloping like the rest of the branch, so
+  // that settling the height afterwards is a nudge rather than a rebuild.
+  const drawnLength = drawn.reduce((sum, piece) => sum + piece.length, 0) || 1;
+  const drawnSlope =
+    drawn.reduce((sum, piece) => sum + (piece.drop ?? 0) * piece.length, 0) / drawnLength;
 
   // Pointing the wrong way matters as much as being in the wrong place: a
   // branch that arrives beside the main line facing across it is no use.
@@ -97,7 +119,8 @@ export function fitBranch(
     const gap = branchGap(pieces, whole, from, to);
     const worth = score(gap);
     if (!best || worth < bestWorth) {
-      best = { pieces: whole, gap };
+      // Clearance is filled in once, at the end, on the one that wins.
+      best = { pieces: whole, gap, clearance: Number.POSITIVE_INFINITY };
       bestWorth = worth;
     }
   };
@@ -114,8 +137,8 @@ export function fitBranch(
         for (let turnB = turnFrom; turnB <= turnTo; turnB += turnStep) {
           for (let lengthB = LENGTH_LOW; lengthB <= LENGTH_HIGH; lengthB += lengthStep) {
             consider([
-              { length: lengthA, turn: turnA, drop: 0, width, walls: true },
-              { length: lengthB, turn: turnB, drop: 0, width, walls: true },
+              { length: lengthA, turn: turnA, drop: drawnSlope, width, walls: true },
+              { length: lengthB, turn: turnB, drop: drawnSlope, width, walls: true },
             ]);
           }
         }
@@ -143,8 +166,8 @@ export function fitBranch(
             lengthB += 2
           ) {
             consider([
-              { length: lengthA, turn: turnA, drop: 0, width, walls: true },
-              { length: lengthB, turn: turnB, drop: 0, width, walls: true },
+              { length: lengthA, turn: turnA, drop: drawnSlope, width, walls: true },
+              { length: lengthB, turn: turnB, drop: drawnSlope, width, walls: true },
             ]);
           }
         }
@@ -153,25 +176,39 @@ export function fitBranch(
   }
 
   const found = best as FitResult | null;
-  if (!found) return { pieces: drawn, gap: branchGap(pieces, drawn, from, to) };
+  if (!found) {
+    return {
+      pieces: drawn,
+      gap: branchGap(pieces, drawn, from, to),
+      clearance: branchClearance(pieces, drawn, from, to),
+    };
+  }
 
   // The height is settled last and on its own: it does not affect where the
   // branch comes out on the ground. The gap is then measured again, because
   // reporting the one from before the height was fixed would be reporting a
   // number that is no longer true.
   const settled = matchHeight(pieces, found.pieces, from, to);
-  return { pieces: settled, gap: branchGap(pieces, settled, from, to) };
+  return {
+    pieces: settled,
+    gap: branchGap(pieces, settled, from, to),
+    clearance: branchClearance(pieces, settled, from, to),
+  };
 }
 
 /**
- * Spreads the drop evenly down the whole branch.
+ * Settles the branch at the right height without flattening its shape.
  *
- * The height has to come out where the main line does, and the obvious way
- * to arrange that — put the shortfall into the closing stretches — leaves
- * the branch diving steeply and then running along the flat, where the ball
- * coasts to a stop before it ever gets back. An even slope the whole way
- * down costs the branch its character but keeps it a hill, which is the
- * more important of the two.
+ * The height has to come out where the main line does. The way this used to
+ * be done — give every stretch of the branch the same slope — did close it,
+ * and cost the branch everything that made it worth taking: a plunge drawn
+ * at the top came out the same gentle gradient as the run-out at the bottom.
+ *
+ * So the whole branch is tipped by one common amount instead. Steep bits
+ * stay steeper than gentle ones, the shape the author drew survives, and it
+ * still lands exactly where it has to. Tipping rather than scaling matters:
+ * scaling would flatten a branch that already nearly fits and steepen one
+ * that barely drops at all, which is backwards.
  */
 function matchHeight(
   pieces: CoursePiece[],
@@ -181,12 +218,11 @@ function matchHeight(
 ): CoursePiece[] {
   const wanted = -poseAfter(pieces.slice(from, to)).y;
   const total = whole.reduce((sum, piece) => sum + piece.length, 0) || 1;
-  const slope = (Math.atan2(wanted, total) * 180) / Math.PI;
-  for (const piece of whole) piece.drop = Math.max(-45, Math.min(45, slope));
 
-  // Then nudged until it lands, since a turning stretch covers a little less
-  // ground than its length.
-  for (let attempt = 0; attempt < 30; attempt++) {
+  // Tipped a little at a time rather than solved: a turning stretch covers
+  // less ground than its length, so how far a given tip actually drops is
+  // not something worth working out in closed form.
+  for (let attempt = 0; attempt < 60; attempt++) {
     const missing = -poseAfter(whole).y - wanted;
     if (Math.abs(missing) < 0.05) break;
     const change = (Math.atan2(missing, total) * 180) / Math.PI;
@@ -200,4 +236,11 @@ function matchHeight(
 /** Says plainly how far out a branch is, for the editor to show. */
 export function describeGap(gap: BranchGap): string {
   return `ずれ ${gap.apart.toFixed(2)}m ／ 高さ ${gap.height.toFixed(2)}m ／ 向き ${gap.facing.toFixed(1)}°`;
+}
+
+/** Says plainly how far the two ways down keep away from each other. */
+export function describeClearance(clearance: number): string {
+  if (!Number.isFinite(clearance)) return 'はなれ ―';
+  if (clearance < 0) return `かさなり ${(-clearance).toFixed(1)}m ぶん`;
+  return `はなれ ${clearance.toFixed(1)}m`;
 }

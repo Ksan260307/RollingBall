@@ -22,6 +22,15 @@ export interface Stage {
   altPieces?: CoursePiece[];
   /** How far along the choice is made, in metres. */
   forkAt?: number;
+  /**
+   * How far along the other way rejoins, in metres.
+   *
+   * Measured along the other way, not the main one, because the two are
+   * different lengths — that is the whole point of a shortcut. Between the
+   * fork and here is the only stretch where the two ways differ; before and
+   * after they are the very same floor in the very same place.
+   */
+  rejoinAt?: number;
   id: string;
   name: string;
   blurb: string;
@@ -263,7 +272,109 @@ export function branchGap(pieces: CoursePiece[], branch: CoursePiece[], from: nu
  * A metre or so of slack is invisible once the floor has width, and asking
  * for better than that by hand would make a fork impossible to write.
  */
-export const BRANCH_TOLERANCE = { apart: 1.5, height: 1.5, facing: 8 };
+export const BRANCH_TOLERANCE = { apart: 1.5, height: 1.5, facing: 8, clearance: 0.5 };
+
+/**
+ * How far from a junction the two ways are allowed to be on top of each other.
+ *
+ * Right where a road splits, the two halves are touching — that is what a
+ * split looks like. It is further along that they have to be somewhere
+ * different from each other.
+ *
+ * Fourteen metres, because these roads are about ten wide: two of them
+ * cannot possibly be clear of one another until they have had at least a
+ * stretch's worth of room to get apart in. Measuring closer in would
+ * condemn every fork ever drawn.
+ */
+const JUNCTION = 14;
+
+/**
+ * How much room a road needs above it to pass underneath another one.
+ *
+ * Two floors in the same place on the map are only a problem if they are
+ * also at the same height. With enough between them it is not a clash, it
+ * is a bridge, and one of the nicer things a fork can do.
+ */
+const HEADROOM = 2.5;
+
+/**
+ * How much daylight there is between the two ways down, at their closest.
+ *
+ * Zero means their floors touch; below zero means one is inside the other,
+ * which on screen is not two roads at all — it is one road with the other
+ * buried in it, flickering through.
+ *
+ * Only the stretch where the two genuinely differ is measured, and only
+ * away from either junction.
+ */
+export function branchClearance(
+  pieces: CoursePiece[],
+  branch: CoursePiece[],
+  from: number,
+  to: number,
+): number {
+  const main = buildCourse(pieces, 0);
+  const alt = buildCourse([...pieces.slice(0, from), ...branch, ...pieces.slice(to)], 0);
+  const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
+  const mainTo = forkAt + pieces.slice(from, to).reduce((sum, piece) => sum + piece.length, 0);
+  const altTo = forkAt + branch.reduce((sum, piece) => sum + piece.length, 0);
+
+  let closest = Number.POSITIVE_INFINITY;
+  for (let j = 0; j < alt.count; j++) {
+    const ad = alt.distance[j] / ONE;
+    if (ad < forkAt + JUNCTION || ad > altTo - JUNCTION) continue;
+    for (let i = 0; i < main.count; i++) {
+      const md = main.distance[i] / ONE;
+      if (md < forkAt + JUNCTION || md > mainTo - JUNCTION) continue;
+      const dx = (alt.x[j] - main.x[i]) / ONE;
+      const dz = (alt.z[j] - main.z[i]) / ONE;
+      const dy = (alt.y[j] - main.y[i]) / ONE;
+      const flat =
+        Math.sqrt(dx * dx + dz * dz) - (alt.halfWidth[j] + main.halfWidth[i]) / ONE;
+      // Far enough to the side, or far enough above or below: either will do.
+      closest = Math.min(closest, Math.max(flat, Math.abs(dy) - HEADROOM));
+    }
+  }
+  // Nothing to measure means nothing overlapping, which is as clear as it gets.
+  return Number.isFinite(closest) ? closest : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * How far the two ways down get from each other at their widest.
+ *
+ * Not overlapping is the floor; this is the ceiling. A branch that shuffles
+ * a couple of metres sideways and comes back has not overlapped anything
+ * and has not given the player a choice they can see either. Measured
+ * between the two floors at the point where the branch is furthest from
+ * anything on the main line, which is the moment the fork actually looks
+ * like one.
+ */
+export function branchSpread(
+  pieces: CoursePiece[],
+  branch: CoursePiece[],
+  from: number,
+  to: number,
+): number {
+  const main = buildCourse(pieces, 0);
+  const alt = buildCourse([...pieces.slice(0, from), ...branch, ...pieces.slice(to)], 0);
+  const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
+  const altTo = forkAt + branch.reduce((sum, piece) => sum + piece.length, 0);
+
+  let widest = 0;
+  for (let j = 0; j < alt.count; j++) {
+    const ad = alt.distance[j] / ONE;
+    if (ad < forkAt || ad > altTo) continue;
+    let nearest = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < main.count; i++) {
+      const dx = (alt.x[j] - main.x[i]) / ONE;
+      const dy = (alt.y[j] - main.y[i]) / ONE;
+      const dz = (alt.z[j] - main.z[i]) / ONE;
+      nearest = Math.min(nearest, Math.sqrt(dx * dx + dy * dy + dz * dz));
+    }
+    widest = Math.max(widest, nearest);
+  }
+  return widest;
+}
 
 /** Whether a branch comes back to where it left, near enough. */
 export function branchCloses(gap: BranchGap): boolean {
@@ -285,7 +396,7 @@ export function branchCloses(gap: BranchGap): boolean {
 function branchOf(
   stored: StoredCourse,
   pieces: CoursePiece[],
-): { altPieces?: CoursePiece[]; forkAt?: number } {
+): { altPieces?: CoursePiece[]; forkAt?: number; rejoinAt?: number } {
   const branch = stored.branch;
   if (!branch || !Array.isArray(branch.pieces) || branch.pieces.length === 0) return {};
   const from = Math.round(number(branch.from, -1, 0, pieces.length));
@@ -299,10 +410,18 @@ function branchOf(
   // course plays as though it had never been written.
   if (!branchCloses(branchGap(pieces, detour, from, to))) return {};
 
+  // Nor is a branch that runs through the middle of the road it left. It
+  // closes, and it is drivable, and on screen it is invisible — one floor
+  // inside the other. Dropped for the same reason as one that never comes
+  // back: a fork you cannot see is not a fork.
+  if (branchClearance(pieces, detour, from, to) < BRANCH_TOLERANCE.clearance) return {};
+
   const altPieces = [...pieces.slice(0, from), ...detour, ...pieces.slice(to)];
-  // The choice is made where the two ways part company.
+  // The choice is made where the two ways part company, and taken back
+  // where they meet again. Between those two is all either way has to draw.
   const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
-  return { altPieces, forkAt };
+  const rejoinAt = forkAt + detour.reduce((sum, piece) => sum + piece.length, 0);
+  return { altPieces, forkAt, rejoinAt };
 }
 
 /** Every course in the file, ready to play. */

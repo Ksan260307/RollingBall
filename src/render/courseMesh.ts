@@ -106,10 +106,31 @@ function floorTint(base: Color, surface: number, striped: boolean): Color {
 }
 
 /**
+ * Only part of a course, in metres along it.
+ *
+ * Used for the second way down at a fork. Both ways are the same course
+ * with a stretch swapped out, so drawing both of them whole puts two
+ * identical floors in exactly the same place — which does not look like two
+ * roads, it looks like one road flickering. Only the stretch that differs
+ * is drawn for the second way; the shared parts are already there.
+ */
+export interface CourseStretch {
+  /** Where to start drawing, in metres along the course. */
+  from: number;
+  /** Where to stop, in metres along the course. */
+  to: number;
+}
+
+/**
  * Builds every piece of the course.
+ * @param only draw just this stretch of it, or all of it where left out
  * @returns a group ready to be added to the scene
  */
-export function buildCourseMesh(course: Course, colours: CourseColours): Group {
+export function buildCourseMesh(
+  course: Course,
+  colours: CourseColours,
+  only: CourseStretch | null = null,
+): Group {
   const group = new Group();
   group.name = 'course';
 
@@ -130,6 +151,20 @@ export function buildCourseMesh(course: Course, colours: CourseColours): Group {
   let previousSkirtRight: [number, number] | null = null;
 
   for (let i = 0; i < course.count; i++) {
+    if (only) {
+      const along = toMetres(course.distance[i]);
+      // The junction points themselves are kept, so this stretch meets the
+      // road it leaves and the road it comes back to rather than floating.
+      if (along < only.from || along > only.to) {
+        previousFloor = null;
+        previousEdgeLeft = null;
+        previousEdgeRight = null;
+        previousWall = null;
+        previousSkirtLeft = null;
+        previousSkirtRight = null;
+        continue;
+      }
+    }
     const missing = (course.flags[i] & PointFlag.Gap) !== 0;
     const hasWalls = (course.flags[i] & PointFlag.Walls) !== 0;
     const striped = (i & 1) === 0;
