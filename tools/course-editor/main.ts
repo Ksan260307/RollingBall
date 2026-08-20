@@ -33,6 +33,7 @@ import {
   branchClearance,
   branchCloses,
   branchGap,
+  branchShows,
 } from '../../src/game/stages';
 import { describeClearance, describeGap, fitBranch } from './fit';
 import { toNumber } from '../../src/core/fixed';
@@ -196,9 +197,9 @@ function refreshPreview(): void {
     const from = Math.max(0, Math.min(stage.pieces.length, Math.round(branch.from)));
     const to = Math.max(from, Math.min(stage.pieces.length, Math.round(branch.to)));
     const other = buildCourse([...stage.pieces.slice(0, from), ...held, ...stage.pieces.slice(to)], 0);
-    const forkAt = stage.pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
-    const rejoinAt = forkAt + held.reduce((sum, piece) => sum + piece.length, 0);
-    branchMesh = buildCourseMesh(other, paint, { from: forkAt, to: rejoinAt });
+    // Held back from both junctions the same way the game holds it back, so
+    // that what is drawn here is what will be drawn there.
+    branchMesh = buildCourseMesh(other, paint, branchShows(stage.pieces, held, from, to));
     scene.add(branchMesh);
   }
 

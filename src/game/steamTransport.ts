@@ -47,6 +47,23 @@ declare global {
   }
 }
 
+/**
+ * Whether this is the desktop copy of the game rather than the website.
+ *
+ * The two are the very same build — the desktop shell just wraps it — so
+ * the difference is what the shell puts out for the game to find. Racing
+ * other people is offered only here, because a page served from a static
+ * host has nowhere to find anybody: the browser can only reach another
+ * window of itself on the same machine, which is a fine thing to have
+ * built and a poor thing to offer on a title screen.
+ *
+ * True whether or not Steam itself answered, so that a desktop build can
+ * still be developed and played with Steam shut.
+ */
+export function desktopBuild(): boolean {
+  return typeof window !== 'undefined' && typeof window.steam?.send === 'function';
+}
+
 /** Whether this copy of the game is running with Steam behind it. */
 export function steamAvailable(): boolean {
   return (

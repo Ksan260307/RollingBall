@@ -363,8 +363,11 @@ export class GameView {
       this.altMesh = null;
     }
     if (alt) {
-      const forkAt = stage.forkAt ?? 0;
-      const rejoinAt = stage.rejoinAt ?? alt.totalLength / ONE;
+      // Trimmed at both ends as well, because for a few metres either side
+      // of a junction the two roads share floor, and drawing both there
+      // lays a slab of one across the other.
+      const forkAt = stage.shows?.from ?? stage.forkAt ?? 0;
+      const rejoinAt = stage.shows?.to ?? stage.rejoinAt ?? alt.totalLength / ONE;
       this.altMesh = buildCourseMesh(
         alt,
         {

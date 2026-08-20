@@ -482,7 +482,7 @@
   {
    "id": "fork",
    "name": "ふたまたの谷",
-   "blurb": "みぎは 大まわりの ながい道、ひだりは 下へ もぐる 細い ちかみち。",
+   "blurb": "道が 大きく 左右に わかれます。ひだりは つるつるで 速い、みぎは しっかり 掴める 道。",
    "difficulty": 3,
    "inGame": true,
    "mood": {
@@ -495,7 +495,7 @@
    },
    "breeze": 0,
    "seed": 5150422,
-   "targetSeconds": 20,
+   "targetSeconds": 21,
    "pieces": [
     {
      "length": 12,
@@ -506,14 +506,14 @@
     {
      "length": 12,
      "drop": 8,
-     "width": 14,
+     "width": 10,
      "walls": true
     },
     {
      "length": 12,
      "turn": 86,
      "drop": 7,
-     "width": 10,
+     "width": 6,
      "walls": true,
      "bank": 12
     },
@@ -551,7 +551,7 @@
      "length": 12,
      "turn": 86,
      "drop": 7,
-     "width": 10,
+     "width": 8,
      "walls": true,
      "bank": 12
     },
@@ -574,35 +574,55 @@
     "pieces": [
      {
       "length": 12,
-      "turn": -29,
-      "drop": 14.1,
-      "width": 4.0,
+      "turn": -86,
+      "drop": 7,
+      "width": 6,
       "walls": true,
-      "surface": "rough"
+      "surface": "slick",
+      "bank": -12
      },
      {
-      "length": 8,
-      "turn": 26,
-      "drop": 14.1,
-      "width": 3.4,
+      "length": 12,
+      "turn": 0,
+      "drop": 7,
+      "width": 8,
       "walls": true,
-      "surface": "rough"
+      "surface": "slick"
      },
      {
-      "length": 8,
-      "turn": 32,
-      "drop": 14.1,
-      "width": 3.4,
+      "length": 12,
+      "turn": 86,
+      "drop": 7,
+      "width": 8,
       "walls": true,
-      "surface": "rough"
+      "surface": "slick",
+      "bank": 12
      },
      {
-      "length": 8,
-      "turn": -29,
-      "drop": 14.1,
-      "width": 4.6,
+      "length": 12,
+      "turn": 86,
+      "drop": 7,
+      "width": 8,
       "walls": true,
-      "surface": "rough"
+      "surface": "slick",
+      "bank": 12
+     },
+     {
+      "length": 12,
+      "turn": 0,
+      "drop": 7,
+      "width": 8,
+      "walls": true,
+      "surface": "slick"
+     },
+     {
+      "length": 12,
+      "turn": -86,
+      "drop": 7,
+      "width": 6,
+      "walls": true,
+      "surface": "slick",
+      "bank": -12
      }
     ]
    }

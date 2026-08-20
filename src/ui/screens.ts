@@ -8,10 +8,20 @@
  */
 
 import { RunSummary } from '../game/session';
+import { desktopBuild } from '../game/steamTransport';
 import { STAGES, Stage, courseMetres } from '../game/stages';
 import { Records, Settings } from '../game/storage';
 import { button, clear, el, slider, toggle } from './dom';
 import { TEXT, difficultyDots, formatSpeed, formatTime } from './text';
+
+/**
+ * How many of the how-to lines are about racing other people.
+ *
+ * They sit at the end of the list so that leaving them out on the website,
+ * where there is nobody to race, is a matter of stopping early rather than
+ * picking lines out of the middle.
+ */
+const TOGETHER_LINES = 2;
 
 export type ScreenName =
   | 'title'
@@ -103,7 +113,10 @@ export class Screens {
           'div',
           { class: 'title-buttons' },
           button(TEXT.play, () => this.actions.onPlay(), 'primary'),
-          button(TEXT.together, () => this.actions.onTogether(), 'wide'),
+          // Racing other people is offered only on the desktop copy, which
+          // has somewhere to find them. On the website the button would
+          // lead to a room nobody outside this browser can walk into.
+          ...(desktopBuild() ? [button(TEXT.together, () => this.actions.onTogether(), 'wide')] : []),
           button(TEXT.customise, () => this.actions.onCustomise()),
           button(TEXT.howTo, () => this.actions.onHowTo()),
           button(TEXT.settings, () => this.actions.onSettings(), 'wide'),
@@ -146,7 +159,9 @@ export class Screens {
         el(
           'div',
           { class: 'panel-body' },
-          ...TEXT.howToBody.map((line) => el('p', { class: 'howto-line', text: line })),
+          ...(desktopBuild() ? TEXT.howToBody : TEXT.howToBody.slice(0, -TOGETHER_LINES)).map(
+            (line) => el('p', { class: 'howto-line', text: line }),
+          ),
         ),
       ),
     );

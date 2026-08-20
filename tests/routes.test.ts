@@ -182,9 +182,21 @@ describe('a course with two ways down', () => {
     for (const stage of STAGES) {
       const has = altCourseFor(stage) !== null;
       expect(has).toBe(stage.altPieces !== undefined);
-      // And where there is one, it really is a second way down and not a
-      // copy of the first.
-      if (has) expect(altCourseFor(stage)!.totalLength).not.toBe(courseFor(stage).totalLength);
+      // And where there is one, it really goes somewhere else. Not measured
+      // by length: two ways round can be the same distance and still be a
+      // choice, which is exactly what the fork in the game is.
+      if (has) {
+        const other = altCourseFor(stage)!;
+        const along = courseFor(stage);
+        let furthest = 0;
+        for (let i = 0; i < other.count && i < along.count; i++) {
+          furthest = Math.max(
+            furthest,
+            Math.abs(other.x[i] - along.x[i]) + Math.abs(other.z[i] - along.z[i]),
+          );
+        }
+        expect(furthest / ONE).toBeGreaterThan(10);
+      }
     }
     // One course forks today; the rest do not.
     expect(STAGES.filter((stage) => altCourseFor(stage) !== null)).toHaveLength(1);
@@ -350,13 +362,39 @@ describe('two ways you can actually tell apart', () => {
     expect(branchSpread(stage.pieces, detour, 2, 8)).toBeGreaterThan(8);
   });
 
-  it('is genuinely the shorter way round', () => {
+  it('sends the two ways round opposite sides of the same ground', () => {
     const stage = stageById('fork');
-    if (!stage) throw new Error('the fork course went missing');
+    if (!stage?.altPieces) throw new Error('the fork course lost its branch');
     const main = courseFor(stage);
-    const other = altCourseFor(stage);
-    expect(other).not.toBeNull();
-    expect(other!.totalLength).toBeLessThan(main.totalLength);
+    const other = altCourseFor(stage)!;
+
+    // One swings well out one way and the other well out the other, rather
+    // than both going much the same way a few metres apart. That is what
+    // makes it read as a fork from the seat of the ball.
+    let mainSide = 0;
+    let otherSide = 0;
+    for (let i = 0; i < main.count; i++) {
+      const along = main.distance[i] / ONE;
+      if (along < (stage.forkAt ?? 0) || along > (stage.rejoinAt ?? 0)) continue;
+      mainSide = Math.max(mainSide, main.x[i] / ONE);
+    }
+    for (let i = 0; i < other.count; i++) {
+      const along = other.distance[i] / ONE;
+      if (along < (stage.forkAt ?? 0) || along > (stage.rejoinAt ?? 0)) continue;
+      otherSide = Math.min(otherSide, other.x[i] / ONE);
+    }
+    expect(mainSide).toBeGreaterThan(15);
+    expect(otherSide).toBeLessThan(-15);
+  });
+
+  it('draws the second way short of both junctions, where it would lie on the first', () => {
+    const stage = stageById('fork');
+    if (!stage?.shows) throw new Error('the fork course lost its branch');
+    expect(stage.shows.from).toBeGreaterThan(stage.forkAt ?? 0);
+    expect(stage.shows.to).toBeLessThan(stage.rejoinAt ?? 0);
+    // But not so short that the two roads no longer meet on screen.
+    expect(stage.shows.from - (stage.forkAt ?? 0)).toBeLessThan(14);
+    expect((stage.rejoinAt ?? 0) - stage.shows.to).toBeLessThan(14);
   });
 
   it('knows where the two ways part and where they meet again', () => {

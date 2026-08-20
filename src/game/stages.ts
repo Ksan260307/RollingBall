@@ -31,6 +31,14 @@ export interface Stage {
    * after they are the very same floor in the very same place.
    */
   rejoinAt?: number;
+  /**
+   * The stretch of the other way that is actually drawn, in metres along it.
+   *
+   * Inside the fork and the join, because for a few metres either side of a
+   * junction the two roads share floor and drawing both puts one across the
+   * other. See branchShows.
+   */
+  shows?: { from: number; to: number };
   id: string;
   name: string;
   blurb: string;
@@ -298,6 +306,14 @@ const JUNCTION = 14;
 const HEADROOM = 2.5;
 
 /**
+ * How many points past standing clear the second road is still drawn.
+ *
+ * Points are laid every couple of metres, so this is a handful of metres of
+ * deliberate overlap at each junction — enough that the two roads touch.
+ */
+const INTO_THE_JUNCTION = 2;
+
+/**
  * How much daylight there is between the two ways down, at their closest.
  *
  * Zero means their floors touch; below zero means one is inside the other,
@@ -337,6 +353,66 @@ export function branchClearance(
   }
   // Nothing to measure means nothing overlapping, which is as clear as it gets.
   return Number.isFinite(closest) ? closest : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Which stretch of the other way down is worth drawing.
+ *
+ * Two roads that split cannot help sharing floor right at the junction:
+ * they leave the same point, and however hard they turn away from each
+ * other it takes a few metres before their floors are in different places.
+ * Drawn as they are, that shows up as a slab of one road lying across the
+ * other — which is precisely what a fork should not look like.
+ *
+ * So the second way is drawn only from where it has genuinely got clear,
+ * to where it starts closing in again. What is left at either end is the
+ * main road's own floor, wide and unbroken, with the other way peeling off
+ * it. That is what a fork looks like from above a real one.
+ */
+export function branchShows(
+  pieces: CoursePiece[],
+  branch: CoursePiece[],
+  from: number,
+  to: number,
+): { from: number; to: number } {
+  const main = buildCourse(pieces, 0);
+  const alt = buildCourse([...pieces.slice(0, from), ...branch, ...pieces.slice(to)], 0);
+  const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
+  const altTo = forkAt + branch.reduce((sum, piece) => sum + piece.length, 0);
+
+  /** Whether the other way, at this point, is standing clear of the main. */
+  const standsClear = (j: number): boolean => {
+    for (let i = 0; i < main.count; i++) {
+      const dx = (alt.x[j] - main.x[i]) / ONE;
+      const dz = (alt.z[j] - main.z[i]) / ONE;
+      const dy = (alt.y[j] - main.y[i]) / ONE;
+      const flat =
+        Math.sqrt(dx * dx + dz * dz) - (alt.halfWidth[j] + main.halfWidth[i]) / ONE;
+      if (Math.max(flat, Math.abs(dy) - HEADROOM) < 0) return false;
+    }
+    return true;
+  };
+
+  let first = -1;
+  let last = -1;
+  for (let j = 0; j < alt.count; j++) {
+    const along = alt.distance[j] / ONE;
+    if (along < forkAt || along > altTo) continue;
+    if (!standsClear(j)) continue;
+    if (first < 0) first = j;
+    last = j;
+  }
+  // Nothing stands clear anywhere: draw the lot and let it look how it looks,
+  // rather than quietly drawing nothing at all.
+  if (first < 0) return { from: forkAt, to: altTo };
+
+  // Carried a little further in at each end than strictly stands clear, so
+  // that the second road runs up to the first rather than starting in
+  // mid-air a stride away from it. What that costs is a sliver of shared
+  // floor at the very tip of the split, which is what the tip of a split is.
+  const back = Math.max(0, first - INTO_THE_JUNCTION);
+  const on = Math.min(alt.count - 1, last + INTO_THE_JUNCTION);
+  return { from: alt.distance[back] / ONE, to: alt.distance[on] / ONE };
 }
 
 /**
@@ -396,7 +472,7 @@ export function branchCloses(gap: BranchGap): boolean {
 function branchOf(
   stored: StoredCourse,
   pieces: CoursePiece[],
-): { altPieces?: CoursePiece[]; forkAt?: number; rejoinAt?: number } {
+): { altPieces?: CoursePiece[]; forkAt?: number; rejoinAt?: number; shows?: { from: number; to: number } } {
   const branch = stored.branch;
   if (!branch || !Array.isArray(branch.pieces) || branch.pieces.length === 0) return {};
   const from = Math.round(number(branch.from, -1, 0, pieces.length));
@@ -421,7 +497,7 @@ function branchOf(
   // where they meet again. Between those two is all either way has to draw.
   const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
   const rejoinAt = forkAt + detour.reduce((sum, piece) => sum + piece.length, 0);
-  return { altPieces, forkAt, rejoinAt };
+  return { altPieces, forkAt, rejoinAt, shows: branchShows(pieces, detour, from, to) };
 }
 
 /** Every course in the file, ready to play. */
