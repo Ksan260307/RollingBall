@@ -478,6 +478,132 @@
           "walls": true
         }
       ]
+    },
+    {
+      "id": "fork",
+      "name": "ふたまたの谷",
+      "blurb": "とちゅうで 道が わかれます。ひだりは 細い ちかみち、みぎは ながい 安全な道。",
+      "difficulty": 3,
+      "inGame": true,
+      "mood": {
+        "sky": "#7fd6c4",
+        "horizon": "#e3fbf5",
+        "ground": "#4f7a63",
+        "floor": "#e9f2ee",
+        "edge": "#ffb703",
+        "fog": 175
+      },
+      "breeze": 0,
+      "seed": 5150422,
+      "targetSeconds": 20,
+      "pieces": [
+        {
+          "length": 12,
+          "drop": 10,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "drop": 8,
+          "width": 14,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": 86,
+          "drop": 7,
+          "width": 10,
+          "bank": 12,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": 0,
+          "drop": 7,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": -86,
+          "drop": 7,
+          "width": 10,
+          "bank": -12,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": -86,
+          "drop": 7,
+          "width": 10,
+          "bank": -12,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": 0,
+          "drop": 7,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 12,
+          "turn": 86,
+          "drop": 7,
+          "width": 10,
+          "bank": 12,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "drop": 8,
+          "width": 10,
+          "walls": true
+        },
+        {
+          "length": 14,
+          "drop": 8,
+          "width": 10,
+          "walls": true
+        }
+      ],
+      "branch": {
+        "from": 2,
+        "to": 8,
+        "pieces": [
+          {
+            "length": 10,
+            "width": 3.2,
+            "walls": true,
+            "surface": "rough",
+            "drop": 14.94
+          },
+          {
+            "length": 10,
+            "width": 2.8,
+            "walls": true,
+            "surface": "rough",
+            "drop": 14.94
+          },
+          {
+            "length": 8,
+            "width": 6,
+            "walls": true,
+            "surface": "rough",
+            "turn": -1,
+            "drop": 14.94
+          },
+          {
+            "length": 6,
+            "width": 6,
+            "walls": true,
+            "surface": "rough",
+            "turn": 2,
+            "drop": 14.94
+          }
+        ]
+      }
     }
   ]
 }

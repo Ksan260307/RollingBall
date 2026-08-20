@@ -53,10 +53,23 @@ function fromLeanByte(value: number): number {
   return Math.round((signed * 65536) / 127);
 }
 
+/**
+ * How coarsely steering is kept.
+ *
+ * Sixty-four positions either side of the middle. A thumb cannot tell that
+ * from a hundred and twenty-seven, and it makes a whole run squash to about
+ * half the size — which is the difference between a run that fits in a
+ * picture somebody can scan and one that does not.
+ */
+const STEP = 4;
+
 function toByte(value: number): number {
   // -65536..65536 squeezed into -127..127, then stored without a sign bit.
   const clamped = value < -65536 ? -65536 : value > 65536 ? 65536 : value;
-  const scaled = Math.round((clamped * 127) / 65536);
+  // Held inside the range after rounding: letting a full lock round up to
+  // 128 would carry into the sign and come out as a full lock the other way.
+  const stepped = Math.round((clamped * 127) / 65536 / STEP) * STEP;
+  const scaled = stepped < -127 ? -127 : stepped > 127 ? 127 : stepped;
   return (scaled + 128) & 0xff;
 }
 

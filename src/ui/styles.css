@@ -1644,3 +1644,26 @@ body {
   letter-spacing: 0.1em;
   opacity: 0.7;
 }
+
+/* Parts of the sharing panel that are put away in one mode or the other. */
+.share-inner .is-hidden {
+  display: none;
+}
+
+/* Trying the ball out without leaving the workbench. */
+.test-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.test-row .button {
+  flex: 0 0 auto;
+}
+
+.test-note {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}

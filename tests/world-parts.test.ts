@@ -143,7 +143,11 @@ describe('recording what the player did', () => {
   it('packs and unpacks steering without losing the feel of it', () => {
     for (const steer of [-65536, -32768, 0, 20000, 65536]) {
       const back = unpackControls(packControls({ steer, push: 0, buttons: 0 }));
-      expect(Math.abs(back.steer - steer)).toBeLessThan(600);
+      // One step of the recording, which is a sixty-fourth of full lock.
+      // Coarser than it was, on purpose: it halves the size of a whole run,
+      // which is what lets one fit in a picture somebody can scan. No thumb
+      // can hold a wheel to a sixty-fourth anyway.
+      expect(Math.abs(back.steer - steer)).toBeLessThan(2100);
     }
   });
 
@@ -186,7 +190,7 @@ describe('recording what the player did', () => {
       track.record(2, p, packControls({ steer: p * 10000, push: 0, buttons: 0 }));
     }
     for (let p = 0; p < MAX_PLAYERS; p++) {
-      expect(unpackControls(track.read(2, p)).steer).toBeCloseTo(p * 10000, -3);
+      expect(unpackControls(track.read(2, p)).steer).toBeCloseTo(p * 10000, -4);
     }
   });
 

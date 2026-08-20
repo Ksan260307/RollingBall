@@ -33,6 +33,7 @@ export interface ScreenActions {
   onRetry(): void;
   onNextStage(): void;
   onWatchAgain(): void;
+  onShareRun(): void;
   onBackToStages(): void;
   onResume(): void;
   onSettingsChange(settings: Settings): void;
@@ -294,6 +295,7 @@ export class Screens {
             button(TEXT.retry, () => this.actions.onRetry(), 'primary'),
             won && hasNext ? button(TEXT.nextStage, () => this.actions.onNextStage()) : null,
             button(TEXT.watchAgain, () => this.actions.onWatchAgain()),
+            button(TEXT.challengeButton, () => this.actions.onShareRun()),
             button(TEXT.backToStages, () => this.actions.onBackToStages(), 'ghost'),
             button(TEXT.backToTitle, () => this.actions.onBackToTitle(), 'ghost'),
           ),

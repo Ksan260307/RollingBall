@@ -9,13 +9,13 @@
 
 import './ui/styles.css';
 import { ONE } from './core/fixed';
-import { measureShape } from './core/ballShape';
+import { type ShapeStats, measureShape } from './core/ballShape';
 import { unpackControls } from './core/input';
 import { Session, type SessionOptions } from './game/session';
 import { Playback } from './game/playback';
 import { Ghost } from './game/ghost';
 import { demoControls } from './game/demoDriver';
-import { STAGES, Stage, altCourseFor, courseFor } from './game/stages';
+import { STAGES, Stage, altCourseFor, courseFor, stageFromStored } from './game/stages';
 import type { Course } from './core/course';
 import {
   BallDesign,
@@ -37,6 +37,8 @@ import { ControlReader } from './ui/controls';
 import { BallEditor } from './ui/editor';
 import { SharePanel } from './ui/share';
 import { readRecipe, recipeFromLink } from './game/recipe';
+import { challengeFromLink, challengeLink, readChallenge } from './game/challenge';
+import { DAILY_ID, dailyCourse, dayNumber } from './game/daily';
 import { Hud } from './ui/hud';
 import { Screens, ScreenName } from './ui/screens';
 import { button, el } from './ui/dom';
@@ -77,11 +79,19 @@ function main(): void {
     options: SessionOptions;
     controls: number[];
     finished: boolean;
+    seconds: number;
   } | null = null;
   /** Seconds to hold on the end of a replay before it comes round again. */
   let replayHold = 0;
   /** The best run so far on this course, racing alongside. */
   let ghost: Ghost | null = null;
+  /**
+   * A run somebody else handed over, to be raced instead of your own best.
+   *
+   * Cleared once it has been used, so going back to a course afterwards
+   * puts you back to racing yourself rather than a stranger for ever.
+   */
+  let challenge: { ball: ShapeStats; controls: number[] } | null = null;
 
   const controls = new ControlReader(canvas);
   controls.invertPush = settings.invertPush;
@@ -147,6 +157,7 @@ function main(): void {
       onSettings: () => show('settings'),
       onChooseStage: (stage) => startRun(stage),
       onBackToTitle: () => {
+        challenge = null;
         session = null;
         show('title');
         startDemo();
@@ -166,11 +177,13 @@ function main(): void {
         }
       },
       onWatchAgain: () => startReplay(),
+      onShareRun: () => void shareRun(),
       onNextStage: () => {
         const index = STAGES.findIndex((s) => s.id === currentStage.id);
         startRun(STAGES[Math.min(STAGES.length - 1, index + 1)]);
       },
       onBackToStages: () => {
+        challenge = null;
         session = null;
         screens.setStages(records);
         show('stages');
@@ -334,6 +347,17 @@ function main(): void {
     if (!playing) controls.reset();
   }
 
+  /**
+   * The course a challenge was set on.
+   *
+   * The one made from the date is rebuilt for the day it was set, so a run
+   * from yesterday can still be raced today on the hill it was set on.
+   */
+  function stageForChallenge(courseId: string, day: number): Stage | null {
+    if (courseId === DAILY_ID) return stageFromStored(dailyCourse(day), 99);
+    return STAGES.find((stage) => stage.id === courseId) ?? null;
+  }
+
   function nudgeZoom(change: number): void {
     settings.zoom = Math.min(2, Math.max(0.5, settings.zoom + change));
     view.zoom = settings.zoom;
@@ -428,12 +452,18 @@ function main(): void {
     ghost = null;
     view.hideGhost();
     hud.setGap(null);
-    if (!settings.ghost) return;
-    const stored = loadGhost(stage.id);
+    const taken = challenge;
+    if (!taken && !settings.ghost) return;
+    const stored = taken ? taken.controls : loadGhost(stage.id);
     if (!stored) return;
     try {
       ghost = new Ghost(
-        { stage, course, ball: measureShape(design.voxels, design.weightAt), countdownSeconds: 3 },
+        {
+          stage,
+          course,
+          ball: taken ? taken.ball : measureShape(design.voxels, design.weightAt),
+          countdownSeconds: 3,
+        },
         stored,
       );
       void view.setGhostBall(design);
@@ -443,6 +473,28 @@ function main(): void {
     }
   }
 
+  /** Hands the run just finished to somebody else. */
+  async function shareRun(): Promise<void> {
+    if (!lastRun || lastRun.controls.length === 0) return;
+    const link = await challengeLink(
+      currentStage.id,
+      currentStage.id === DAILY_ID ? dayNumber() : 0,
+      lastRun.seconds,
+      design,
+      lastRun.controls,
+      window.location.href,
+    );
+    share.openRun(link, TEXT.challengeTitle);
+  }
+
+  /**
+   * Sets up the ghost to race against.
+   *
+   * A run somebody handed over wins out over your own best: it is the thing
+   * you came here to beat, and it is raced with their ball rather than
+   * yours, because the same steering given to a different ball goes
+   * somewhere else entirely.
+   */
   function beginPlaying(): void {
     if (!session) return;
     session.paused = false;
@@ -502,6 +554,7 @@ function main(): void {
       },
       controls: session.replay(),
       finished: won,
+      seconds: summary.seconds,
     };
 
     if (won) {
@@ -662,6 +715,23 @@ function main(): void {
       }
     }
     requestAnimationFrame(frame);
+  }
+
+  // A run handed over by address: straight onto that course, racing it.
+  const thrown = challengeFromLink(window.location.search);
+  if (thrown) {
+    void (async () => {
+      const held = await readChallenge(decodeURIComponent(thrown));
+      if (!held) return;
+      const stage = stageForChallenge(held.courseId, held.day);
+      if (!stage) return;
+      challenge = {
+        ball: measureShape(held.ball.voxels, held.ball.weightAt),
+        controls: held.controls,
+      };
+      window.history.replaceState(null, '', window.location.pathname);
+      startRun(stage);
+    })();
   }
 
   // A ball handed over by address: open the workbench with it already there

@@ -174,10 +174,16 @@ describe('a course with two ways down', () => {
     expect(world.route[0]).toBe(wentLeft);
   });
 
-  it('leaves every shipped course alone, none of which forks', () => {
+  it('gives exactly the shipped courses that say they fork a second way', () => {
     for (const stage of STAGES) {
-      expect(altCourseFor(stage)).toBeNull();
+      const has = altCourseFor(stage) !== null;
+      expect(has).toBe(stage.altPieces !== undefined);
+      // And where there is one, it really is a second way down and not a
+      // copy of the first.
+      if (has) expect(altCourseFor(stage)!.totalLength).not.toBe(courseFor(stage).totalLength);
     }
+    // One course forks today; the rest do not.
+    expect(STAGES.filter((stage) => altCourseFor(stage) !== null)).toHaveLength(1);
   });
 });
 

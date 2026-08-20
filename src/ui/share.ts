@@ -36,6 +36,11 @@ export class SharePanel {
   private readonly picture: HTMLElement;
   private readonly notice: HTMLElement;
   private readonly nameBox: HTMLInputElement;
+  private readonly heading: HTMLElement;
+  private readonly hint: HTMLElement;
+  private readonly keepRow: HTMLElement;
+  private readonly shelfTitle: HTMLElement;
+  private readonly useButton: HTMLElement;
   private readonly actions: ShareActions;
   private shelf: KeptBall[] = [];
 
@@ -53,6 +58,17 @@ export class SharePanel {
       attrs: { rows: '3', spellcheck: 'false', 'aria-label': TEXT.recipeCode },
     }) as HTMLTextAreaElement;
 
+    this.heading = el('h2', { text: TEXT.recipeTitle });
+    this.hint = el('p', { class: 'share-hint', text: TEXT.recipeHint });
+    this.keepRow = el(
+      'div',
+      { class: 'share-row' },
+      this.nameBox,
+      button(TEXT.recipeKeep, () => this.keep()),
+    );
+    this.shelfTitle = el('h3', { text: TEXT.recipeShare });
+    this.useButton = button(TEXT.recipeUse, () => this.usePasted(), 'primary');
+
     this.root = el(
       'div',
       { class: 'share-panel is-hidden' },
@@ -62,33 +78,53 @@ export class SharePanel {
         el(
           'div',
           { class: 'share-head' },
-          el('h2', { text: TEXT.recipeTitle }),
+          this.heading,
           button(TEXT.close, () => this.close(), 'ghost'),
         ),
-        el('p', { class: 'share-hint', text: TEXT.recipeHint }),
-        el(
-          'div',
-          { class: 'share-row' },
-          this.nameBox,
-          button(TEXT.recipeKeep, () => this.keep()),
-        ),
+        this.hint,
+        this.keepRow,
         this.shelfList,
-        el('h3', { text: TEXT.recipeShare }),
+        this.shelfTitle,
         this.picture,
         this.codeBox,
         el(
           'div',
           { class: 'share-row' },
           button(TEXT.recipeCopy, () => void this.copy()),
-          button(TEXT.recipeUse, () => this.usePasted(), 'primary'),
+          this.useButton,
         ),
         this.notice,
       ),
     );
   }
 
+  /**
+   * Opens the panel on a run rather than on a ball.
+   *
+   * The shelf and the naming are for balls, so they are put away: a run is
+   * something you hand over once, not something you keep on a shelf.
+   */
+  openRun(link: string, title: string): void {
+    this.notice.textContent = '';
+    this.heading.textContent = title;
+    this.hint.textContent = TEXT.challengeHint;
+    this.keepRow.classList.add('is-hidden');
+    this.shelfList.classList.add('is-hidden');
+    this.shelfTitle.classList.add('is-hidden');
+    this.codeBox.value = link;
+    this.drawPicture(link);
+    this.useButton.textContent = TEXT.challengeUse;
+    this.root.classList.remove('is-hidden');
+  }
+
   /** Opens the panel, showing the ball as it stands. */
   open(): void {
+    this.heading.textContent = TEXT.recipeTitle;
+    this.hint.textContent = TEXT.recipeHint;
+    this.keepRow.classList.remove('is-hidden');
+    this.shelfList.classList.remove('is-hidden');
+    this.shelfTitle.classList.remove('is-hidden');
+    this.useButton.textContent = TEXT.recipeUse;
     this.shelf = loadShelf();
     this.notice.textContent = '';
     this.nameBox.value = '';
@@ -124,7 +160,10 @@ export class SharePanel {
   private drawPicture(link: string): void {
     clear(this.picture);
     try {
-      const code = qrcode(0, 'M');
+      // A run carries far more than a ball, so it is given the level that
+      // spends fewer cells on repair and keeps the picture small enough to
+      // be read off a screen.
+      const code = qrcode(0, link.length > 900 ? 'L' : 'M');
       code.addData(link);
       code.make();
       const across = code.getModuleCount();

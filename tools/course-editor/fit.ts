@@ -18,7 +18,7 @@
  */
 
 import type { CoursePiece } from '../../src/core/course';
-import { type BranchGap, branchGap, poseAfter } from '../../src/game/stages';
+import { type BranchGap, branchCloses, branchGap, poseAfter } from '../../src/game/stages';
 
 /** How the closing stretches are allowed to look. */
 const TURN_RANGE = 120;
@@ -81,21 +81,21 @@ export function fitBranch(
    * metres wide, which shuts exactly as neatly as it is impossible to
    * drive. Anything tighter than a gentle sweep is charged for here.
    */
-  const awkwardness = (closers: CoursePiece[]): number => {
-    let cost = 0;
-    for (const piece of closers) {
-      const perMetre = Math.abs(piece.turn ?? 0) / Math.max(1, piece.length);
-      if (perMetre > limit) cost += (perMetre - limit) * 14;
-    }
-    return cost;
-  };
+  const drivable = (closers: CoursePiece[], allow: number): boolean =>
+    closers.every(
+      (piece) => Math.abs(piece.turn ?? 0) / Math.max(1, piece.length) <= allow,
+    );
 
   let best: FitResult | null = null;
   let bestWorth = Number.POSITIVE_INFINITY;
+  // Raised only if nothing gentle enough can be made to close: a branch that
+  // shuts is worth more than one that is comfortable and open.
+  let allow = limit;
   const consider = (closers: CoursePiece[]): void => {
+    if (!drivable(closers, allow)) return;
     const whole = [...drawn, ...closers];
     const gap = branchGap(pieces, whole, from, to);
-    const worth = score(gap) + awkwardness(closers);
+    const worth = score(gap);
     if (!best || worth < bestWorth) {
       best = { pieces: whole, gap };
       bestWorth = worth;
@@ -123,7 +123,14 @@ export function fitBranch(
     }
   };
 
-  sweep(-TURN_RANGE, TURN_RANGE, 20, 8);
+  // Gently first. If nothing gentle reaches, ask for progressively more.
+  for (const relaxed of [limit, limit * 1.5, limit * 2.2, 99]) {
+    allow = relaxed;
+    best = null;
+    bestWorth = Number.POSITIVE_INFINITY;
+    sweep(-TURN_RANGE, TURN_RANGE, 20, 8);
+    if (best && branchCloses((best as FitResult).gap)) break;
+  }
   if (best) {
     // Then again, closely, around whatever the coarse pass liked.
     const [a, b] = (best as FitResult).pieces.slice(-2);
@@ -149,9 +156,11 @@ export function fitBranch(
   if (!found) return { pieces: drawn, gap: branchGap(pieces, drawn, from, to) };
 
   // The height is settled last and on its own: it does not affect where the
-  // branch comes out on the ground, so it can simply be shared between the
-  // closing stretches until it matches.
-  return { pieces: matchHeight(pieces, found.pieces, from, to), gap: found.gap } as FitResult;
+  // branch comes out on the ground. The gap is then measured again, because
+  // reporting the one from before the height was fixed would be reporting a
+  // number that is no longer true.
+  const settled = matchHeight(pieces, found.pieces, from, to);
+  return { pieces: settled, gap: branchGap(pieces, settled, from, to) };
 }
 
 /**

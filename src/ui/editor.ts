@@ -25,9 +25,11 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   PerspectiveCamera,
+  Quaternion,
   Raycaster,
   Scene,
   Vector2,
+  Vector3,
   WebGLRenderer,
 } from 'three';
 import {
@@ -47,9 +49,13 @@ import {
   randomShape,
 } from '../core/ballShape';
 import { ONE } from '../core/fixed';
-import { ballFeelFrom } from '../core/simulation';
+import { buildCourse } from '../core/course';
+import { NEUTRAL, packControls } from '../core/input';
+import { RunState, World, ballFeelFrom } from '../core/simulation';
 import { BallDesign } from '../game/storage';
 import { FaceInfo, buildBallGeometry, loadImage, makeBallMaterial, makePhotoTexture } from '../render/ballMesh';
+import { buildCourseMesh, disposeCourseMesh } from '../render/courseMesh';
+import { drawnSpin, emptySpin, spinRate } from '../render/ballSpin';
 import { button, clear, el, slider } from './dom';
 import { TEXT } from './text';
 
@@ -69,6 +75,14 @@ const MAX_PHOTO_BYTES = 24 * 1024 * 1024;
 
 /** How wide the stored copy of a photo is, in pixels. */
 const PHOTO_SIZE = 512;
+
+/** Worked with while a test roll is on, made once rather than every frame. */
+const testAxis = new Vector3();
+const testTurn = new Quaternion();
+const originScratch = new Vector3();
+
+/** Hands off the controls, for a ball left to roll on its own. */
+const NEUTRAL_PACKED = packControls(NEUTRAL);
 
 export class BallEditor {
   readonly root: HTMLElement;
@@ -104,6 +118,24 @@ export class BallEditor {
   private spinY = 0.6;
   private distance = 2.6;
   private animating = false;
+
+  /**
+   * A short slope the ball can be tried on without leaving the workbench.
+   *
+   * The shape decides almost everything about how a ball rolls, and until
+   * now the only way to find that out was to take it to a course and start
+   * a run. Here it is a button: build, roll, watch it wander, go back and
+   * take the lump off.
+   */
+  private testWorld: World | null = null;
+  private testMesh: Group | null = null;
+  private testSpin = new Quaternion();
+  private testLast = 0;
+  private testLeftover = 0;
+  private readonly testSpinScratch = emptySpin();
+  private readonly testRow: HTMLElement;
+  private readonly testNote: HTMLElement;
+  private rolling = false;
 
   private readonly statsRow: HTMLElement;
   private readonly readout: HTMLElement;
@@ -147,6 +179,13 @@ export class BallEditor {
       this.weightDot,
     );
     this.weightNote = el('span', { class: 'weight-note' });
+    this.testNote = el('span', { class: 'test-note' });
+    this.testRow = el(
+      'div',
+      { class: 'test-row' },
+      button(TEXT.testRoll, () => this.toggleRoll()),
+      this.testNote,
+    );
     this.weightPanel = el(
       'div',
       { class: 'weight-panel' },
@@ -225,6 +264,7 @@ export class BallEditor {
               this.design.shine = value;
               this.rebuild();
             }),
+            this.testRow,
             this.weightPanel,
             this.statsRow,
             this.noticeRow,
@@ -633,17 +673,131 @@ export class BallEditor {
 
   private frame = (): void => {
     if (!this.animating || !this.renderer) return;
+    if (this.rolling) this.stepRoll(performance.now());
     this.updateCamera();
     this.renderer.render(this.scene, this.camera);
     requestAnimationFrame(this.frame);
   };
 
   private updateCamera(): void {
+    // While a test roll is on, the camera follows the ball down instead of
+    // circling the workbench.
+    const at = this.rolling ? this.ballGroup.position : originScratch;
     const x = Math.sin(this.spinY) * Math.cos(this.spinX) * this.distance;
     const y = Math.sin(this.spinX) * this.distance;
     const z = Math.cos(this.spinY) * Math.cos(this.spinX) * this.distance;
-    this.camera.position.set(x, y, z);
-    this.camera.lookAt(0, 0, 0);
+    this.camera.position.set(at.x + x, at.y + y, at.z + z);
+    this.camera.lookAt(at.x, at.y, at.z);
+  }
+
+  /** Starts the test roll, or stops it and puts the workbench back. */
+  private toggleRoll(): void {
+    if (this.rolling) {
+      this.stopRoll();
+      return;
+    }
+    // A gentle slope with a bend in it: enough to show up drag, wandering
+    // and a ball that will not go where it is put, without being a course.
+    const course = buildCourse(
+      [
+        { length: 14, drop: 11, width: 7, walls: true },
+        { length: 14, turn: 22, drop: 9, width: 7, walls: true },
+        { length: 14, turn: -24, drop: 9, width: 7, walls: true },
+        { length: 12, drop: 8, width: 7, walls: true },
+      ],
+      0,
+    );
+    this.testWorld = new World({
+      course,
+      seed: 7,
+      ball: measureShape(this.design.voxels, this.design.weightAt),
+      countdownSeconds: 0,
+    });
+    if (!this.testMesh) {
+      this.testMesh = buildCourseMesh(course, {
+        floor: '#e8eef6',
+        edge: '#ffd166',
+        ground: '#2b3350',
+      });
+      this.scene.add(this.testMesh);
+    }
+    this.testSpin.identity();
+    this.testLeftover = 0;
+    this.testLast = performance.now();
+    this.rolling = true;
+    this.testNote.textContent = TEXT.testRolling;
+    this.setRollButton();
+  }
+
+  /** Puts everything back the way it was before the test roll. */
+  private stopRoll(): void {
+    this.rolling = false;
+    this.testWorld = null;
+    if (this.testMesh) {
+      this.scene.remove(this.testMesh);
+      disposeCourseMesh(this.testMesh);
+      this.testMesh = null;
+    }
+    this.ballGroup.position.set(0, 0, 0);
+    this.ballGroup.quaternion.identity();
+    this.testNote.textContent = '';
+    this.setRollButton();
+  }
+
+  private setRollButton(): void {
+    const node = this.testRow.querySelector('button');
+    if (node) node.textContent = this.rolling ? TEXT.testStop : TEXT.testRoll;
+  }
+
+  /**
+   * Moves the test roll on, and says plainly what the ball is doing.
+   *
+   * The same rules as a real run, so what is seen here is what will happen
+   * out there: nothing is softened for the workbench.
+   */
+  private stepRoll(now: number): void {
+    const world = this.testWorld;
+    if (!world) return;
+    const delta = Math.min(0.1, (now - this.testLast) / 1000);
+    this.testLast = now;
+
+    let taken = 0;
+    this.testLeftover += delta;
+    while (this.testLeftover >= 1 / 120 && taken < 10) {
+      // Left alone: no steering, no push. Not zero — zero packs as hard
+      // left and hard back, which would be a very odd way to test a ball.
+      world.advance([NEUTRAL_PACKED]);
+      this.testLeftover -= 1 / 120;
+      taken++;
+      if (world.state[0] !== RunState.Rolling) break;
+    }
+
+    this.ballGroup.position.set(
+      world.x[0] / ONE,
+      world.y[0] / ONE,
+      world.z[0] / ONE,
+    );
+    const spin = drawnSpin(world, this.testSpinScratch);
+    const rate = spinRate(spin);
+    if (rate > 1e-5) {
+      testAxis.set(spin.x / rate, spin.y / rate, spin.z / rate);
+      testTurn.setFromAxisAngle(testAxis, rate * delta);
+      this.testSpin.premultiply(testTurn);
+      this.ballGroup.quaternion.copy(this.testSpin);
+    }
+
+    // How far off the middle of the floor it has wandered, and how quick.
+    const drift = Math.abs(world.sideways[0] / ONE);
+    this.testNote.textContent = `${(world.speedFor(0) / ONE * 3.6).toFixed(0)} km/h ／ ${TEXT.testDrift} ${drift.toFixed(1)}m`;
+
+    if (world.state[0] !== RunState.Rolling) {
+      const done = world.state[0] === RunState.Finished;
+      this.testNote.textContent = done
+        ? `${TEXT.testDone} ${world.secondsFor(0).toFixed(2)}秒`
+        : TEXT.testStuck;
+      this.rolling = false;
+      this.setRollButton();
+    }
   }
 
   /** Fits the workshop view to its box on the page. */
