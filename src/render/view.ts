@@ -112,6 +112,7 @@ const scratchScale = new Vector3(1, 1, 1);
 const scratchAxis = new Vector3();
 const scratchForward = new Vector3();
 const ghostSpinScratch = emptySpin();
+const rivalSpinScratch = emptySpin();
 const scratchRight = new Vector3();
 const spinScratch = emptySpin();
 
@@ -171,6 +172,14 @@ export class GameView {
   zoom = 1;
   /** Turns the heavier effects off on slower devices. */
   richGraphics = true;
+  /**
+   * Which ball this screen is following.
+   *
+   * In a race everybody watches their own, and every other ball on the
+   * course is drawn beside it rather than being the one the camera holds.
+   */
+  watching = 0;
+
   /** How the camera watches the ball. Replays cycle through the lot. */
   cameraStyle: CameraStyle = 'chase';
 
@@ -182,6 +191,16 @@ export class GameView {
   private windLines: LineSegments | null = null;
   private windSeeds: Float32Array | null = null;
   private windPositions: Float32Array | null = null;
+
+  /**
+   * Everybody else's ball.
+   *
+   * Solid, unlike the pale copy a ghost is drawn as: these are really there
+   * and can really be run into, and something you can be knocked off the
+   * course by should not look like a memory.
+   */
+  private readonly rivalGroup = new Group();
+  private rivals: { mesh: Mesh; spin: Quaternion }[] = [];
 
   /** The pale copy of your best run, racing alongside. */
   private readonly ghostGroup = new Group();
@@ -248,6 +267,7 @@ export class GameView {
     this.scene.add(this.ballGroup);
     this.ghostGroup.visible = false;
     this.scene.add(this.ghostGroup);
+    this.scene.add(this.rivalGroup);
     this.buildSceneryLayers();
     this.buildSparkles();
     this.buildTrail();
@@ -459,6 +479,65 @@ export class GameView {
     await Promise.resolve();
   }
 
+  /**
+   * Builds a ball for everybody else in the race.
+   *
+   * Their own designs, so a rival is recognisable at a glance and a heavy
+   * one looks heavy. The list is rebuilt whenever the field changes, which
+   * is once per race.
+   */
+  async setRivals(designs: BallDesign[]): Promise<void> {
+    for (const rival of this.rivals) {
+      this.rivalGroup.remove(rival.mesh);
+      rival.mesh.geometry.dispose();
+      (rival.mesh.material as MeshStandardMaterial).dispose();
+    }
+    this.rivals = [];
+    for (const design of designs) {
+      const built = buildBallMesh(design.voxels, design.shine, 1, design.mixed);
+      built.mesh.castShadow = true;
+      this.rivalGroup.add(built.mesh);
+      this.rivals.push({ mesh: built.mesh, spin: new Quaternion() });
+    }
+  }
+
+  /**
+   * Puts everybody else where they have got to.
+   *
+   * @param world the race
+   * @param seats which player each rival is, in the order they were built
+   * @param delta seconds since the last frame
+   */
+  showRivals(world: World, seats: number[], delta: number): void {
+    for (let i = 0; i < this.rivals.length; i++) {
+      const rival = this.rivals[i];
+      const seat = seats[i];
+      if (seat === undefined) {
+        rival.mesh.visible = false;
+        continue;
+      }
+      rival.mesh.visible = true;
+      rival.mesh.position.set(
+        toMetres(world.x[seat]),
+        toMetres(world.y[seat]),
+        toMetres(world.z[seat]),
+      );
+      const spin = drawnSpin(world, rivalSpinScratch, seat);
+      const rate = spinRate(spin);
+      if (rate > 1e-5) {
+        scratchAxis.set(spin.x / rate, spin.y / rate, spin.z / rate);
+        scratchQuaternion.setFromAxisAngle(scratchAxis, rate * delta);
+        rival.spin.premultiply(scratchQuaternion);
+        rival.mesh.quaternion.copy(rival.spin);
+      }
+    }
+  }
+
+  /** Takes everybody else off the course. */
+  clearRivals(): void {
+    for (const rival of this.rivals) rival.mesh.visible = false;
+  }
+
   /** Hides the pale copy, for a course with no best run behind it. */
   hideGhost(): void {
     this.ghostGroup.visible = false;
@@ -469,9 +548,9 @@ export class GameView {
     if (!this.ghostMesh) return;
     this.ghostGroup.visible = true;
     this.ghostGroup.position.set(
-      toMetres(world.x[0]),
-      toMetres(world.y[0]),
-      toMetres(world.z[0]),
+      toMetres(world.x[this.watching]),
+      toMetres(world.y[this.watching]),
+      toMetres(world.z[this.watching]),
     );
     const spin = drawnSpin(world, ghostSpinScratch);
     const rate = spinRate(spin);
@@ -545,7 +624,7 @@ export class GameView {
    */
   startBreakthrough(world: World): void {
     const speed = Math.max(6, world.speedFor(0) / ONE);
-    const point = Math.min(world.course.count - 1, Math.max(0, courseIndexOf(world)));
+    const point = Math.min(world.course.count - 1, Math.max(0, courseIndexOf(world, this.watching)));
     this.breakAway
       .set(
         toMetres(world.course.forwardX[point]),
@@ -677,8 +756,8 @@ export class GameView {
       return;
     }
 
-    const course = world.courseFor(0);
-    const point = Math.min(course.count - 1, Math.max(0, courseIndexOf(world)));
+    const course = world.courseFor(this.watching);
+    const point = Math.min(course.count - 1, Math.max(0, courseIndexOf(world, this.watching)));
     // Across the course, which is the way the wind pushes.
     const acrossX = toMetres(course.rightX[point]) * Math.sign(blowing);
     const acrossY = toMetres(course.rightY[point]) * Math.sign(blowing);
@@ -728,12 +807,12 @@ export class GameView {
       return;
     }
 
-    const speed = world.speedFor(0) / ONE;
+    const speed = world.speedFor(this.watching) / ONE;
     const strength = Math.min(
       1,
       Math.max(0, (speed - TRAIL_FROM_SPEED) / (TRAIL_FULL_SPEED - TRAIL_FROM_SPEED)),
     );
-    if (strength <= 0 || world.grounded[0] !== 1) {
+    if (strength <= 0 || world.grounded[this.watching] !== 1) {
       // Let it run out rather than snapping off the moment it slows.
       if (this.trailPath.length > 6) this.trailPath.splice(0, 3);
       if (this.trailPath.length < 12) {
@@ -893,9 +972,9 @@ export class GameView {
     const px = toMetres(previous.x);
     const py = toMetres(previous.y);
     const pz = toMetres(previous.z);
-    const nx = toMetres(world.x[0]);
-    const ny = toMetres(world.y[0]);
-    const nz = toMetres(world.z[0]);
+    const nx = toMetres(world.x[this.watching]);
+    const ny = toMetres(world.y[this.watching]);
+    const nz = toMetres(world.z[this.watching]);
     const bx = px + (nx - px) * alpha;
     const by = py + (ny - py) * alpha;
     const bz = pz + (nz - pz) * alpha;
@@ -953,7 +1032,7 @@ export class GameView {
    * rolling.
    */
   private spinBall(world: World, delta: number): void {
-    const spin = drawnSpin(world, spinScratch);
+    const spin = drawnSpin(world, spinScratch, this.watching);
     const rate = spinRate(spin);
     if (rate > 1e-5) {
       scratchAxis.set(spin.x / rate, spin.y / rate, spin.z / rate);
@@ -973,7 +1052,7 @@ export class GameView {
     seconds: number,
   ): void {
     const course = world.course;
-    const point = Math.min(course.count - 1, Math.max(0, courseIndexOf(world)));
+    const point = Math.min(course.count - 1, Math.max(0, courseIndexOf(world, this.watching)));
     const forward = scratchForward.set(
       toMetres(course.forwardX[point]),
       toMetres(course.forwardY[point]),
@@ -1045,7 +1124,7 @@ export class GameView {
     // The view opens out as the ball gets going. It is a small change and
     // nobody notices it happening, which is the point: what they notice is
     // that going fast feels like going fast.
-    const speed = world.speedFor(0) / ONE;
+    const speed = world.speedFor(this.watching) / ONE;
     const rush = Math.min(1, Math.max(0, (speed - 5) / 8));
     const wanted = FOV_STILL + (FOV_FLYING - FOV_STILL) * rush;
     const eased = this.camera.fov + (wanted - this.camera.fov) * (1 - Math.exp(-3 * delta));
@@ -1067,7 +1146,7 @@ export class GameView {
 }
 
 /** Which point of the course chain the ball is nearest, for the camera. */
-function courseIndexOf(world: World): number {
+function courseIndexOf(world: World, player = 0): number {
   const spacing = 2 * ONE;
-  return Math.round(world.travelled[0] / spacing);
+  return Math.round(world.travelled[player] / spacing);
 }

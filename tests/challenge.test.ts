@@ -9,7 +9,6 @@
 import { describe, expect, it } from 'vitest';
 import qrcode from 'qrcode-generator';
 import jsQR from 'jsqr';
-import { ONE } from '../src/core/fixed';
 import { unpackControls } from '../src/core/input';
 import { defaultShape, measureShape, randomShape } from '../src/core/ballShape';
 import { RunState } from '../src/core/simulation';

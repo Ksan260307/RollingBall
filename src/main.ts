@@ -9,11 +9,15 @@
 
 import './ui/styles.css';
 import { ONE } from './core/fixed';
-import { type ShapeStats, measureShape } from './core/ballShape';
+import { type ShapeStats, measureShape, randomShape } from './core/ballShape';
 import { unpackControls } from './core/input';
 import { Session, type SessionOptions } from './game/session';
 import { Playback } from './game/playback';
 import { Ghost } from './game/ghost';
+import { Race, type Placing, type Seat } from './game/race';
+import { Lobby, WindowTransport, type Player } from './game/lobby';
+import { SteamTransport, steamAvailable } from './game/steamTransport';
+import { readRecipe, writeRecipe } from './game/recipe';
 import { demoControls } from './game/demoDriver';
 import { STAGES, Stage, altCourseFor, courseFor, stageFromStored } from './game/stages';
 import type { Course } from './core/course';
@@ -36,7 +40,7 @@ import { GameView } from './render/view';
 import { ControlReader } from './ui/controls';
 import { BallEditor } from './ui/editor';
 import { SharePanel } from './ui/share';
-import { readRecipe, recipeFromLink } from './game/recipe';
+import { recipeFromLink } from './game/recipe';
 import { challengeFromLink, challengeLink, readChallenge } from './game/challenge';
 import { DAILY_ID, dailyCourse, dayNumber } from './game/daily';
 import { Hud } from './ui/hud';
@@ -44,7 +48,13 @@ import { Screens, ScreenName } from './ui/screens';
 import { button, el } from './ui/dom';
 import { TEXT } from './ui/text';
 
-type Mode = 'menu' | 'playing' | 'paused' | 'result' | 'editor' | 'replay';
+type Mode = 'menu' | 'playing' | 'paused' | 'result' | 'editor' | 'replay' | 'lobby' | 'racing';
+
+/** How many can be on the course at once. */
+const FIELD = 4;
+
+/** How long a room waits before it gives up and calls in the robots. */
+const HUNT_SECONDS = 20;
 
 /** How long a replay holds on the finish before starting over. */
 const REPLAY_ENDING = 1.3;
@@ -92,6 +102,12 @@ function main(): void {
    * puts you back to racing yourself rather than a stranger for ever.
    */
   let challenge: { ball: ShapeStats; controls: number[] } | null = null;
+  /** The race everybody is in, and the room it was gathered in. */
+  let race: Race | null = null;
+  let lobby: Lobby | null = null;
+  let huntedFor = 0;
+  /** Which seat each rival ball belongs to, in the order they were built. */
+  let rivalSeats: number[] = [];
 
   const controls = new ControlReader(canvas);
   controls.invertPush = settings.invertPush;
@@ -158,6 +174,7 @@ function main(): void {
       onChooseStage: (stage) => startRun(stage),
       onBackToTitle: () => {
         challenge = null;
+        endRace();
         session = null;
         show('title');
         startDemo();
@@ -177,6 +194,11 @@ function main(): void {
         }
       },
       onWatchAgain: () => startReplay(),
+      onTogether: () => openLobby(),
+      onLobbyStart: () => beginRace(),
+      onLobbyRobots: () => beginRace(true),
+      onLobbyLeave: () => leaveLobby(),
+      onRaceAgain: () => openLobby(),
       onShareRun: () => void shareRun(),
       onNextStage: () => {
         const index = STAGES.findIndex((s) => s.id === currentStage.id);
@@ -323,6 +345,7 @@ function main(): void {
   });
   editor.onSave((next) => {
     design = next;
+    void refreshRecipe();
     saveBall(design);
     void view.setBall(design);
     editor.close();
@@ -495,6 +518,221 @@ function main(): void {
    * yours, because the same steering given to a different ball goes
    * somewhere else entirely.
    */
+  /* ------------------------------------------------------- playing together */
+
+  /**
+   * Opens the waiting room and starts looking for somebody.
+   *
+   * Nobody is made to wait for a stranger who may never come: the robots
+   * are always there, the button to start with them is always live, and
+   * anybody who turns up in the meantime simply takes a robot's seat.
+   */
+  function openLobby(): void {
+    endRace();
+    // Steam where Steam is running, and the browser's own channel between
+    // windows everywhere else. Everything above this line is the same
+    // either way: the waiting room, the race and the rules never find out
+    // which one carried the message.
+    const transport = steamAvailable() ? new SteamTransport() : new WindowTransport();
+    lobby = new Lobby({
+      transport,
+      room: 'lobby',
+      name: TEXT.raceYou,
+      ball: myRecipe,
+      most: FIELD,
+    });
+    // Everybody's ball is worked out as they turn up, so the race can start
+    // the moment somebody calls it rather than waiting on the unpacking.
+    lobby.onPlayers = (players) => {
+      for (const player of players) void learnBall(player);
+      showLobby(players);
+    };
+    lobby.onStart = (order) => startRace(order);
+    lobby.onDid = (who, step, packed) => {
+      if (!race || !lobby) return;
+      const seat = seatOf(who);
+      if (seat >= 0) race.hear(seat, step, packed);
+    };
+    lobby.begin();
+    huntedFor = 0;
+    mode = 'lobby';
+    show('lobby');
+    showLobby(lobby.players);
+  }
+
+  /** Everybody in the room, in the order they were gathered. */
+  let order: Player[] = [];
+
+  /**
+   * This player's ball, written down for the others.
+   *
+   * Kept up to date whenever the ball changes, because everybody in a race
+   * has to be rolling what they actually built: the same steering given to
+   * a different ball goes somewhere else entirely.
+   */
+  let myRecipe = '';
+  void refreshRecipe();
+
+  async function refreshRecipe(): Promise<void> {
+    myRecipe = await writeRecipe(design);
+  }
+
+  /** What each player in the room is rolling, once it has been read. */
+  const theirBalls = new Map<string, { stats: ShapeStats; design: BallDesign }>();
+
+  /** Reads somebody's ball, so their seat can be filled with the real thing. */
+  async function learnBall(player: Player): Promise<void> {
+    if (player.ball.length === 0 || theirBalls.has(player.who)) return;
+    const held = await readRecipe(player.ball);
+    if (!held) return;
+    theirBalls.set(player.who, {
+      stats: measureShape(held.voxels, held.weightAt),
+      design: {
+        voxels: held.voxels,
+        photo: null,
+        photoStrength: 0.85,
+        shine: held.shine,
+        mixed: held.mixed,
+        weightAt: held.weightAt,
+      },
+    });
+  }
+
+  function seatOf(who: string): number {
+    return order.findIndex((player) => player.who === who);
+  }
+
+  function showLobby(players: Player[]): void {
+    if (!lobby) return;
+    const names = players.map((player, index) =>
+      player.who === lobby?.me ? `${TEXT.raceYou}（${index + 1}）` : `${TEXT.raceFriend}（${index + 1}）`,
+    );
+    const note = !lobby.usable
+      ? TEXT.lobbyNobody
+      : players.length > 1
+        ? `${TEXT.lobbyCourse}: ${currentStage.name}`
+        : steamAvailable()
+          ? TEXT.lobbySteam
+          : TEXT.lobbyLocal;
+    screens.setLobby(names, note, players.length >= 2);
+  }
+
+  /** Calls the start, either with whoever turned up or with robots. */
+  function beginRace(robotsOnly = false, byItself = false): void {
+    if (!lobby) return;
+    if (!robotsOnly && lobby.players.length >= 2) {
+      // A room that fills up on its own is started by one screen, so that
+      // several noticing at the same moment do not all call it. A button is
+      // pressed by a person, and whoever presses it does the calling.
+      if (byItself && !lobby.callsTheStart) return;
+      lobby.callStart(currentStage.id, 0);
+      return;
+    }
+    startRace([{ who: lobby.me, name: TEXT.raceYou, ball: myRecipe }]);
+  }
+
+  /** Sets up the race and gets everybody rolling. */
+  function startRace(field: Player[]): void {
+    if (!lobby) return;
+    order = field;
+    const mine = measureShape(design.voxels, design.weightAt);
+    const seats: Seat[] = [];
+    /** The ball drawn for each seat, so rivals look like what they roll. */
+    const looks: BallDesign[] = [];
+    for (let index = 0; index < FIELD; index++) {
+      const player = field[index];
+      if (player) {
+        const yours = player.who === lobby.me;
+        const theirs = theirBalls.get(player.who);
+        seats.push({
+          kind: yours ? 'you' : 'friend',
+          name: yours ? TEXT.raceYou : `${TEXT.raceFriend}${index + 1}`,
+          // Their own ball where it has arrived; yours as a stand-in until
+          // it does, which is better than an empty course.
+          ball: yours ? mine : theirs?.stats ?? mine,
+          keenness: 1,
+        });
+        looks.push(yours ? design : theirs?.design ?? design);
+      } else {
+        // Empty seats are filled, so a race is always a race. Each robot
+        // gets its own ball and its own keenness, or four identical ones
+        // would run nose to tail the whole way down.
+        const shape = randomShape(1000 + index * 37);
+        seats.push({
+          kind: 'robot',
+          name: `${TEXT.raceRobot}${index}`,
+          ball: measureShape(shape),
+          keenness: 0.98 - index * 0.06,
+        });
+        looks.push({
+          voxels: shape,
+          photo: null,
+          photoStrength: 0.85,
+          shine: 0.35,
+          mixed: [],
+          weightAt: { sideways: 0, up: 0 },
+        });
+      }
+    }
+
+    const you = Math.max(0, field.findIndex((player) => player.who === lobby?.me));
+    race = new Race({ stage: currentStage, seats, you, countdownSeconds: 3 });
+    session = null;
+    demo = null;
+    ghost = null;
+    view.hideGhost();
+    view.clearBreakthrough();
+    view.setStage(currentStage, courseFor(currentStage), altCourseFor(currentStage));
+    view.prepareScenery(race.world);
+    view.watching = you;
+
+    // Everybody else's ball, drawn solid beside yours.
+    rivalSeats = seats.map((_, seat) => seat).filter((seat) => seat !== you);
+    void view.setRivals(rivalSeats.map((seat) => looks[seat]));
+
+    hud.reset();
+    hud.setBest(records[currentStage.id]);
+    mode = 'racing';
+    show('none');
+  }
+
+  /** Packs the race away and lets go of the room. */
+  function endRace(): void {
+    race = null;
+    rivalSeats = [];
+    view.clearRivals();
+    lobby?.end();
+    lobby = null;
+    order = [];
+  }
+
+  function leaveLobby(): void {
+    endRace();
+    show('title');
+    startDemo();
+  }
+
+  /** The table at the end. */
+  function finishRace(): void {
+    if (!race) return;
+    const placings: Placing[] = race.placings();
+    screens.setRaceResult(
+      placings.map((placing) => ({
+        name: placing.name,
+        you: placing.seat === race?.you,
+        finished: placing.finished,
+        seconds: placing.seconds,
+      })),
+    );
+    const yours = placings.find((placing) => placing.seat === race?.you);
+    if (yours?.finished) saveRecord(currentStage.id, yours.seconds);
+    records = loadRecords();
+    view.clearRivals();
+    race = null;
+    mode = 'result';
+    show('raceResult');
+  }
+
   function beginPlaying(): void {
     if (!session) return;
     session.paused = false;
@@ -617,6 +855,45 @@ function main(): void {
     const delta = Math.min(0.1, (now - lastTime) / 1000);
     lastTime = now;
     sceneTime += delta;
+
+    if (mode === 'racing' && race) {
+      const asked = controls.read();
+      hud.showDrag(asked);
+      const { sent } = race.update(delta, asked);
+      for (const [step, packed] of sent) lobby?.say(step, packed);
+
+      const world = race.world;
+      hud.setRush(world.speedFor(race.you) / ONE);
+      hud.setWind(world.windNow() / ONE);
+      sounds.playMoments(world.moments);
+      if (race.running) sounds.followBall(world);
+      else sounds.quieten();
+      for (const moment of world.moments) {
+        if (moment.kind === 'barge') {
+          view.burst(moment.x / ONE, moment.y / ONE, moment.z / ONE, '#ffffff', 6);
+          view.shake(0.4);
+        }
+      }
+      view.showRivals(world, rivalSeats, delta);
+      view.render(world, race.alpha, race.previous[race.you], delta, sceneTime);
+      if (!race.running) finishRace();
+      requestAnimationFrame(frame);
+      return;
+    }
+
+    if (mode === 'lobby' && lobby) {
+      // Looking for somebody, but never for ever.
+      huntedFor += delta;
+      if (huntedFor > HUNT_SECONDS && lobby.players.length < 2) beginRace(true);
+      else if (lobby.players.length >= 2) beginRace(false, true);
+      if (demo) {
+        demo.update(delta, unpackControls(demoControls(demo.world, 0)));
+        if (!demo.running) startDemo();
+        view.render(demo.world, demo.alpha, demo.previous, delta, sceneTime);
+      }
+      requestAnimationFrame(frame);
+      return;
+    }
 
     if (mode === 'replay' && playback) {
       const played = playback.advance(delta);

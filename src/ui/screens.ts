@@ -20,11 +20,18 @@ export type ScreenName =
   | 'settings'
   | 'editor'
   | 'result'
+  | 'lobby'
+  | 'raceResult'
   | 'pause'
   | 'none';
 
 export interface ScreenActions {
   onPlay(): void;
+  onTogether(): void;
+  onLobbyStart(): void;
+  onLobbyRobots(): void;
+  onLobbyLeave(): void;
+  onRaceAgain(): void;
   onCustomise(): void;
   onHowTo(): void;
   onSettings(): void;
@@ -45,6 +52,9 @@ export class Screens {
   private readonly panels = new Map<ScreenName, HTMLElement>();
   private readonly stageList: HTMLElement;
   private readonly resultBody: HTMLElement;
+  private readonly lobbyBody: HTMLElement;
+  private readonly lobbyNote: HTMLElement;
+  private readonly raceBody: HTMLElement;
   private readonly settingsBody: HTMLElement;
   private current: ScreenName = 'title';
 
@@ -54,6 +64,9 @@ export class Screens {
   ) {
     this.stageList = el('div', { class: 'stage-list' });
     this.resultBody = el('div', { class: 'result-body' });
+    this.lobbyBody = el('div', { class: 'lobby-body' });
+    this.lobbyNote = el('p', { class: 'note' });
+    this.raceBody = el('div', { class: 'result-body' });
     this.settingsBody = el('div', { class: 'panel-body' });
 
     this.root = el('div', { class: 'screens', id: 'screens' });
@@ -62,6 +75,8 @@ export class Screens {
     this.panels.set('howto', this.buildHowTo());
     this.panels.set('settings', this.buildSettings());
     this.panels.set('result', this.buildResult());
+    this.panels.set('lobby', this.buildLobby());
+    this.panels.set('raceResult', this.buildRaceResult());
     this.panels.set('pause', this.buildPause());
     for (const panel of this.panels.values()) this.root.append(panel);
     this.show('title');
@@ -88,6 +103,7 @@ export class Screens {
           'div',
           { class: 'title-buttons' },
           button(TEXT.play, () => this.actions.onPlay(), 'primary'),
+          button(TEXT.together, () => this.actions.onTogether(), 'wide'),
           button(TEXT.customise, () => this.actions.onCustomise()),
           button(TEXT.howTo, () => this.actions.onHowTo()),
           button(TEXT.settings, () => this.actions.onSettings(), 'wide'),
@@ -302,6 +318,93 @@ export class Screens {
         ),
       ),
     );
+  }
+
+  /** The waiting room, where a race is gathered. */
+  private buildLobby(): HTMLElement {
+    return el(
+      'section',
+      { class: 'screen' },
+      el(
+        'div',
+        { class: 'panel' },
+        el('h2', { text: TEXT.lobbyTitle }),
+        el('p', { class: 'tagline', text: TEXT.lobbyHint }),
+        this.lobbyBody,
+        this.lobbyNote,
+        el(
+          'div',
+          { class: 'title-buttons' },
+          button(TEXT.lobbyStart, () => this.actions.onLobbyStart(), 'primary'),
+          button(TEXT.lobbyRobots, () => this.actions.onLobbyRobots()),
+          button(TEXT.lobbyLeave, () => this.actions.onLobbyLeave(), 'ghost'),
+        ),
+      ),
+    );
+  }
+
+  /**
+   * Who is waiting, and what the room can do.
+   *
+   * @param names everybody waiting, this screen first
+   * @param note what the room wants to say about itself
+   * @param canStart whether there are enough people to begin
+   */
+  setLobby(names: string[], note: string, canStart: boolean): void {
+    clear(this.lobbyBody);
+    this.lobbyBody.append(
+      el('p', {
+        class: 'lobby-count',
+        text: names.length > 1 ? `${names.length} ${TEXT.lobbyFound}` : TEXT.lobbyWaiting,
+      }),
+    );
+    for (const name of names) {
+      this.lobbyBody.append(el('div', { class: 'lobby-row', text: name }));
+    }
+    this.lobbyNote.textContent = note;
+    const start = this.panels.get('lobby')?.querySelector('.button.primary') as HTMLButtonElement;
+    if (start) start.disabled = !canStart;
+  }
+
+  /** The table at the end of a race. */
+  private buildRaceResult(): HTMLElement {
+    return el(
+      'section',
+      { class: 'screen' },
+      el(
+        'div',
+        { class: 'panel' },
+        el('h2', { text: TEXT.raceResults }),
+        this.raceBody,
+        el(
+          'div',
+          { class: 'title-buttons' },
+          button(TEXT.raceAgain, () => this.actions.onRaceAgain(), 'primary'),
+          button(TEXT.backToTitle, () => this.actions.onBackToTitle(), 'ghost'),
+        ),
+      ),
+    );
+  }
+
+  /** Fills in who came where. */
+  setRaceResult(rows: { name: string; you: boolean; finished: boolean; seconds: number }[]): void {
+    clear(this.raceBody);
+    const table = el('div', { class: 'race-table' });
+    rows.forEach((row, index) => {
+      table.append(
+        el(
+          'div',
+          { class: `race-row${row.you ? ' is-you' : ''}` },
+          el('span', { class: 'race-place', text: `${index + 1}` }),
+          el('span', { class: 'race-name', text: row.name }),
+          el('span', {
+            class: 'race-time',
+            text: row.finished ? formatTime(row.seconds) : TEXT.raceUnfinished,
+          }),
+        ),
+      );
+    });
+    this.raceBody.append(table);
   }
 
   /** Shows one screen and hides the rest. */

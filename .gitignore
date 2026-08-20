@@ -10,3 +10,5 @@ Thumbs.db
 
 # Films made by the promo recorder. Made on demand, not kept in the repo.
 promo/
+desktop-build/
+desktop-out/

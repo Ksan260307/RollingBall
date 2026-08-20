@@ -37,7 +37,7 @@ import {
   summarise,
 } from './entities';
 import { Checksum, Generator, mix } from './random';
-import { MAX_PLAYERS, unpackControls } from './input';
+import { MAX_PLAYERS, NEUTRAL, packControls, unpackControls } from './input';
 import { ShapeStats } from './ballShape';
 import { SpatialGrid } from './spatialGrid';
 import { Surroundings } from './surroundings';
@@ -153,6 +153,14 @@ const FORK_WINDOW = Math.round(6 * ONE);
 /** How far left of the middle counts as having chosen the other way. */
 const FORK_SHARE = Math.round(0.25 * ONE);
 
+/**
+ * The controls a player who has said nothing is taken to be giving.
+ *
+ * Not zero: zero packs as hard left and hard back, so a missing entry would
+ * throw a ball off the course rather than leave it alone.
+ */
+const NOTHING_HELD = packControls(NEUTRAL);
+
 const STALL_GRACE = 3 * STEPS_PER_SECOND;
 
 /**
@@ -182,6 +190,23 @@ const LANDING_BOUNCE = Math.round(0.26 * ONE);
  * grind along the barrier.
  */
 const WALL_BOUNCE = Math.round(0.75 * ONE);
+
+/**
+ * How much bounce is left after two balls meet.
+ *
+ * Higher than a railing, because a shoulder-barge is the whole point of
+ * racing beside somebody: hitting them should send them somewhere, and it
+ * should cost you something too.
+ */
+const BARGE_BOUNCE = Math.round(0.85 * ONE);
+
+/**
+ * How a barge is shared out between the two of them.
+ *
+ * By weight, so a heavy ball shoves a light one aside and is barely moved
+ * by it. Weight is worth something in a race as well as in the wind.
+ */
+const BARGE_SHARE = ONE;
 
 /** How much a wall scrubs at the ball as it slides along it. */
 const WALL_GRIP = Math.round(0.4 * ONE);
@@ -426,7 +451,7 @@ export function ballFeelFrom(stats: ShapeStats): BallFeel {
 
 /** Something worth showing or hearing about, produced by a step. */
 export interface Moment {
-  kind: 'land' | 'wall' | 'skid' | 'finish' | 'fall' | 'stuck';
+  kind: 'land' | 'wall' | 'skid' | 'finish' | 'fall' | 'stuck' | 'barge';
   player: number;
   x: number;
   y: number;
@@ -439,6 +464,8 @@ export interface WorldOptions {
   course: Course;
   seed: number;
   ball: ShapeStats;
+  /** A ball each, where the players are not all rolling the same one. */
+  balls?: ShapeStats[];
   /** How breezy the course is, from 0 to ONE. */
   breeze?: number;
   /**
@@ -497,7 +524,14 @@ function perStep(value: number): number {
 export class World {
   readonly course: Course;
   readonly seed: number;
-  readonly feel: BallFeel;
+  /**
+   * How each player's ball behaves.
+   *
+   * One per player rather than one for the world: in a race everybody
+   * brings the ball they built, and the whole point of building one is that
+   * it rolls differently from everybody else's.
+   */
+  readonly feels: BallFeel[];
   readonly players: number;
   readonly breeze: number;
   /** The other way down, or nothing where the course does not fork. */
@@ -571,7 +605,10 @@ export class World {
     this.alt = options.alt ?? null;
     this.forkAt = Math.round((options.forkAt ?? 0) * ONE);
     this.seed = options.seed >>> 0;
-    this.feel = ballFeelFrom(options.ball);
+    this.feels = [];
+    for (let p = 0; p < MAX_PLAYERS; p++) {
+      this.feels.push(ballFeelFrom(options.balls?.[p] ?? options.ball));
+    }
     this.players = Math.min(MAX_PLAYERS, Math.max(1, options.players ?? 1));
     this.breeze = options.breeze ?? 0;
     this.countdown = Math.round((options.countdownSeconds ?? 3) * STEPS_PER_SECOND);
@@ -621,7 +658,7 @@ export class World {
       // Players line up side by side, so a shared start would just work.
       const offset =
         this.players > 1 ? Math.round((p - (this.players - 1) / 2) * 1.6 * ONE) : 0;
-      const lift = this.feel.radius;
+      const lift = this.feels[p].radius;
       this.x[p] =
         c.startX + mul(c.rightX[0], offset) + mul(c.upX[0], lift) + mul(c.forwardX[0], START_INSET);
       this.y[p] =
@@ -657,7 +694,7 @@ export class World {
     const c = this.courseFor(player);
     const offset =
       this.players > 1 ? Math.round((player - (this.players - 1) / 2) * 1.6 * ONE) : 0;
-    const lift = this.feel.radius;
+    const lift = this.feels[player].radius;
     this.x[player] =
       c.startX + mul(c.rightX[0], offset) + mul(c.upX[0], lift) + mul(c.forwardX[0], START_INSET);
     this.y[player] =
@@ -797,7 +834,7 @@ export class World {
       c.upX[point],
       c.upY[point],
       c.upZ[point],
-      this.feel.radius,
+      this.feels[player].radius,
     );
     return magnitude(slipScratch.x, slipScratch.y, slipScratch.z);
   }
@@ -931,8 +968,9 @@ export class World {
           this.recovering[p]--;
           continue;
         }
-        this.moveBall(p, controls[p] ?? 0);
+        this.moveBall(p, controls[p] ?? NOTHING_HELD);
       }
+      this.bargeIntoEachOther();
     }
 
     this.mindAttention();
@@ -978,7 +1016,7 @@ export class World {
 
     const overGap = (where.flags & PointFlag.Gap) !== 0;
     const pastTheEnds = where.pastEnd > 0;
-    const gapFromFloor = where.height - this.feel.radius;
+    const gapFromFloor = where.height - this.feels[player].radius;
     const withinFloor = abs(where.sideways) <= where.halfWidth;
     const touching =
       !overGap &&
@@ -1049,7 +1087,7 @@ export class World {
       const strength = mul(this.breeze, where.wind);
       const nudge = div(
         mul(mul(BREEZE_PUSH, strength), blowing),
-        Math.max(1, this.feel.weight),
+        Math.max(1, this.feels[player].weight),
       );
       accelX += mul(rightX, nudge);
       accelY += mul(rightY, nudge);
@@ -1078,7 +1116,7 @@ export class World {
     // The air always resists, and a heavier ball shrugs it off better.
     const speedNow = this.speedFor(player);
     if (speedNow > 0) {
-      const resist = div(mul(AIR_RESISTANCE, speedNow), Math.max(1, this.feel.weight));
+      const resist = div(mul(AIR_RESISTANCE, speedNow), Math.max(1, this.feels[player].weight));
       accelX -= mul(this.velocityX[player], resist);
       accelY -= mul(this.velocityY[player], resist);
       accelZ -= mul(this.velocityZ[player], resist);
@@ -1093,7 +1131,7 @@ export class World {
       // The ground grips the ball at the one point where they touch. That
       // grip is what turns sliding into rolling, and a slippery floor is
       // simply one that runs out of grip too soon.
-      const hold = perStep(mul(mul(floor.grip, this.feel.gripScale), pressing));
+      const hold = perStep(mul(mul(floor.grip, this.feels[player].gripScale), pressing));
       this.applyGrip(player, upX, upY, upZ, hold, true);
       this.applyRollingDrag(player, upX, upY, upZ, floor, pressing);
       this.tripOverBumps(player, upX, upY, upZ, where.travelled);
@@ -1114,6 +1152,94 @@ export class World {
 
     this.settleAgainstWalls(player, (where.flags & PointFlag.Walls) !== 0);
     this.judge(player);
+  }
+
+  /**
+   * Sorts out any two balls that have ended up inside each other.
+   *
+   * Done after everybody has moved, so the order players are stored in
+   * cannot change the outcome: whoever is listed first gets no advantage.
+   * Each pair is pushed apart by the amount they overlap and given a shove
+   * along the line between them, shared out by weight.
+   *
+   * Nothing here reads the clock or asks for a random number, so a race
+   * plays back the same on every device — which is what lets four people
+   * agree on what happened by trading nothing but their steering.
+   */
+  private bargeIntoEachOther(): void {
+    if (this.players < 2) return;
+    for (let a = 0; a < this.players; a++) {
+      if (!this.inPlay(a)) continue;
+      for (let b = a + 1; b < this.players; b++) {
+        if (!this.inPlay(b)) continue;
+
+        const dx = this.x[b] - this.x[a];
+        const dy = this.y[b] - this.y[a];
+        const dz = this.z[b] - this.z[a];
+        const apart = length3(dx, dy, dz);
+        const touching = this.feels[a].radius + this.feels[b].radius;
+        if (apart >= touching) continue;
+
+        // Along the line from one middle to the other. Two balls in exactly
+        // the same place have no such line, so they are sent along the
+        // course instead — otherwise they would sit inside one another for
+        // ever, each waiting for the other to suggest a direction.
+        let nx: number;
+        let ny: number;
+        let nz: number;
+        if (apart <= 0) {
+          const c = this.courseFor(a);
+          const point = Math.min(c.count - 1, Math.max(0, this.hint[a]));
+          nx = c.rightX[point];
+          ny = c.rightY[point];
+          nz = c.rightZ[point];
+        } else {
+          nx = div(dx, apart);
+          ny = div(dy, apart);
+          nz = div(dz, apart);
+        }
+        const overlap = touching - apart;
+
+        // Heavier balls give way less, so a barge is worth weight.
+        const weightA = Math.max(1, this.feels[a].weight);
+        const weightB = Math.max(1, this.feels[b].weight);
+        const total = weightA + weightB;
+        const shareA = div(mul(weightB, BARGE_SHARE), total);
+        const shareB = ONE - shareA;
+
+        this.x[a] -= mul(nx, mul(overlap, shareA));
+        this.y[a] -= mul(ny, mul(overlap, shareA));
+        this.z[a] -= mul(nz, mul(overlap, shareA));
+        this.x[b] += mul(nx, mul(overlap, shareB));
+        this.y[b] += mul(ny, mul(overlap, shareB));
+        this.z[b] += mul(nz, mul(overlap, shareB));
+
+        // How fast they are closing on each other. Two balls drifting apart
+        // that merely happen to overlap are left alone.
+        const closing =
+          mul(this.velocityX[a] - this.velocityX[b], nx) +
+          mul(this.velocityY[a] - this.velocityY[b], ny) +
+          mul(this.velocityZ[a] - this.velocityZ[b], nz);
+        if (closing <= 0) continue;
+
+        const change = closing + mul(closing, BARGE_BOUNCE);
+        this.velocityX[a] -= mul(nx, mul(change, shareA));
+        this.velocityY[a] -= mul(ny, mul(change, shareA));
+        this.velocityZ[a] -= mul(nz, mul(change, shareA));
+        this.velocityX[b] += mul(nx, mul(change, shareB));
+        this.velocityY[b] += mul(ny, mul(change, shareB));
+        this.velocityZ[b] += mul(nz, mul(change, shareB));
+
+        if (closing > Math.round(1.2 * ONE)) {
+          this.addMoment('barge', a, closing);
+        }
+      }
+    }
+  }
+
+  /** True while this player is out on the course and can be run into. */
+  private inPlay(player: number): boolean {
+    return this.state[player] === RunState.Rolling && this.recovering[player] === 0;
   }
 
   /** Sits the ball on the floor and stops it sinking in. */
@@ -1180,12 +1306,12 @@ export class World {
       normalX,
       normalY,
       normalZ,
-      this.feel.radius,
+      this.feels[player].radius,
     );
     const skid = magnitude(slipScratch.x, slipScratch.y, slipScratch.z);
     if (skid <= 0) return;
 
-    const wanted = mul(this.feel.gripShare, skid);
+    const wanted = mul(this.feels[player].gripShare, skid);
     const change = wanted < allowance ? wanted : allowance;
     const changeX = -div(mul(slipScratch.x, change), skid);
     const changeY = -div(mul(slipScratch.y, change), skid);
@@ -1203,8 +1329,8 @@ export class World {
       normalX,
       normalY,
       normalZ,
-      this.feel.spinResistance,
-      this.feel.radius,
+      this.feels[player].spinResistance,
+      this.feels[player].radius,
     );
     this.spinX[player] += spinScratch.x;
     this.spinY[player] += spinScratch.y;
@@ -1232,7 +1358,7 @@ export class World {
   ): void {
     const speed = this.speedFor(player);
     if (speed <= 0 || pressing <= 0) return;
-    const slow = perStep(mul(mul(floor.rollingDrag, this.feel.dragScale), pressing));
+    const slow = perStep(mul(mul(floor.rollingDrag, this.feels[player].dragScale), pressing));
     const drop = slow < speed ? slow : speed;
     if (drop <= 0) return;
     const changeX = -div(mul(this.velocityX[player], drop), speed);
@@ -1242,7 +1368,7 @@ export class World {
     this.velocityY[player] += changeY;
     this.velocityZ[player] += changeZ;
 
-    rollingSpinInto(spinScratch, changeX, changeY, changeZ, upX, upY, upZ, this.feel.radius);
+    rollingSpinInto(spinScratch, changeX, changeY, changeZ, upX, upY, upZ, this.feels[player].radius);
     this.spinX[player] += spinScratch.x;
     this.spinY[player] += spinScratch.y;
     this.spinZ[player] += spinScratch.z;
@@ -1266,17 +1392,17 @@ export class World {
     upZ: number,
     travelled: number,
   ): void {
-    if (this.feel.bumpiness <= 0) return;
+    if (this.feels[player].bumpiness <= 0) return;
     const speed = this.speedFor(player);
     if (speed <= BUMP_FLOOR) return;
 
-    const spacing = Math.max(1, mul(this.feel.radius, BUMP_SPACING));
+    const spacing = Math.max(1, mul(this.feels[player].radius, BUMP_SPACING));
     const phase = div(travelled, spacing);
     const crossed = Math.floor(phase / ONE) !== Math.floor(this.bumpPhase[player] / ONE);
     this.bumpPhase[player] = phase;
     if (!crossed) return;
 
-    const jolt = mul(mul(BUMP_LIFT, this.feel.bumpiness), speed);
+    const jolt = mul(mul(BUMP_LIFT, this.feels[player].bumpiness), speed);
     this.velocityX[player] += mul(upX, jolt);
     this.velocityY[player] += mul(upY, jolt);
     this.velocityZ[player] += mul(upZ, jolt);
@@ -1310,7 +1436,7 @@ export class World {
     rightZ: number,
     travelled: number,
   ): void {
-    if (this.feel.veer <= 0 && this.lean[player] === 0) return;
+    if (this.feels[player].veer <= 0 && this.lean[player] === 0) return;
     const speed = this.speedFor(player);
     if (speed <= BUMP_FLOOR) return;
 
@@ -1334,7 +1460,7 @@ export class World {
 
     // What the shape does on its own: across the way the ball is going, so
     // it throws the ball off whatever line it is holding.
-    const push = mul(mul(mul(VEER_PUSH, this.feel.veer), speed), swing);
+    const push = mul(mul(mul(VEER_PUSH, this.feels[player].veer), speed), swing);
     this.velocityX[player] += mul(sideX, push);
     this.velocityY[player] += mul(sideY, push);
     this.velocityZ[player] += mul(sideZ, push);
@@ -1364,7 +1490,7 @@ export class World {
    * running smoothly, which is what an awkward shape does.
    */
   private turnUnevenly(player: number, travelled: number): void {
-    const feel = this.feel;
+    const feel = this.feels[player];
     if (feel.surge <= 0 && feel.spinSpread <= 0 && this.lean[player] === 0) return;
     const speed = this.speedFor(player);
     if (speed <= BUMP_FLOOR) return;
@@ -1427,10 +1553,10 @@ export class World {
     const c = this.courseFor(player);
     const after = placeOnCourse(c, this.x[player], this.y[player], this.z[player], this.hint[player]);
     const i = after.point;
-    const limit = after.halfWidth - this.feel.radius;
+    const limit = after.halfWidth - this.feels[player].radius;
     if (abs(after.sideways) <= limit) return;
     // Sailing over the top of the wall rather than into it.
-    if (after.height - this.feel.radius > WALL_HEIGHT) return;
+    if (after.height - this.feels[player].radius > WALL_HEIGHT) return;
     if (after.pastEnd > 0) return;
 
     const overshoot = abs(after.sideways) - limit;
@@ -1477,7 +1603,7 @@ export class World {
       mul(this.velocityX[player], c.rightX[where.point]) +
       mul(this.velocityY[player], c.rightY[where.point]) +
       mul(this.velocityZ[player], c.rightZ[where.point]);
-    this.aboveFloor[player] = where.height - this.feel.radius;
+    this.aboveFloor[player] = where.height - this.feels[player].radius;
     const overGap = (where.flags & PointFlag.Gap) !== 0;
     this.grounded[player] =
       !overGap &&
@@ -1493,7 +1619,7 @@ export class World {
     // dip below the edge and be picked up again where the floor widened out,
     // which looked for all the world like falling off and getting away with it.
     const clearOfEdge =
-      abs(where.sideways) > where.halfWidth + this.feel.radius + EDGE_CLEARANCE;
+      abs(where.sideways) > where.halfWidth + this.feels[player].radius + EDGE_CLEARANCE;
     const sinking = where.height < 0;
 
     if (where.height < -FALL_LIMIT || (clearOfEdge && sinking)) {
