@@ -27,6 +27,41 @@ export const Surface = {
 
 export type SurfaceValue = (typeof Surface)[keyof typeof Surface];
 
+/**
+ * Where one road becomes two, or two become one.
+ *
+ * A junction is not a shape of its own here — both ways down are complete
+ * courses, and they simply happen to be in the same place for a stretch.
+ * What a junction says is which side of this stretch the other road is on,
+ * and that is enough to stop a wall being built across the mouth of it.
+ *
+ * Without this a fork is fenced off: the road divides perfectly and the
+ * player looks at a railing running straight across the way in. The side
+ * is written down rather than worked out, because the piece is a thing an
+ * author places, and a thing you place should say what it is.
+ */
+export const Junction = {
+  /** Ordinary road. */
+  None: 0,
+  /** The road divides here and the other way leaves to the left. */
+  SplitLeft: 1,
+  /** The road divides here and the other way leaves to the right. */
+  SplitRight: 2,
+  /** Another way comes back in here from the left. */
+  JoinLeft: 3,
+  /** Another way comes back in here from the right. */
+  JoinRight: 4,
+} as const;
+
+export type JunctionValue = (typeof Junction)[keyof typeof Junction];
+
+/** Which side of a junction the other road is on, or nothing where it is not one. */
+export function junctionSide(junction: JunctionValue): 'left' | 'right' | null {
+  if (junction === Junction.SplitLeft || junction === Junction.JoinLeft) return 'left';
+  if (junction === Junction.SplitRight || junction === Junction.JoinRight) return 'right';
+  return null;
+}
+
 /** Extra properties a point of the chain can carry. */
 export const PointFlag = {
   Walls: 1 << 0,
@@ -34,6 +69,16 @@ export const PointFlag = {
   Gap: 1 << 1,
   /** Marks the finish area. */
   Finish: 1 << 2,
+  /**
+   * No wall along the left edge here, because another road is.
+   *
+   * The floor still ends where it ends and the ball is still kept on by it;
+   * this is only about what is built along the edge. A junction that fences
+   * itself off is the one thing a junction must not do.
+   */
+  OpenLeft: 1 << 3,
+  /** No wall along the right edge here, because another road is. */
+  OpenRight: 1 << 4,
 } as const;
 
 /** One stretch of course, written in everyday units. */
@@ -50,8 +95,19 @@ export interface CoursePiece {
   bank?: number;
   /** What the floor is made of. */
   surface?: SurfaceValue;
-  /** Whether the stretch has walls that keep the ball on. */
+  /** Whether the stretch has walls along both edges that keep the ball on. */
   walls?: boolean;
+  /**
+   * Walls along one edge only, where the two edges want different things.
+   *
+   * A junction wants the edge the other road is on left open, and the far
+   * side of a hard bend wants a wall whatever the near side is doing. Left
+   * out, each side follows `walls`.
+   */
+  wallLeft?: boolean;
+  wallRight?: boolean;
+  /** Whether this stretch is where the road divides, or where it comes back. */
+  junction?: JunctionValue;
   /** Whether the floor is missing here. */
   gap?: boolean;
   /**
@@ -169,7 +225,16 @@ export function buildCourse(pieces: CoursePiece[], startHeight = 0): Course {
     // Missing counts as fully exposed, so older courses are unchanged.
     const wind = metres(Math.min(1, Math.max(0, piece.wind ?? 1)));
     let flags = 0;
-    if (piece.walls) flags |= PointFlag.Walls;
+    // Each edge asked about on its own, falling back to what the whole
+    // stretch says. A junction then opens the edge the other road is on,
+    // whatever was asked for: a railing across the mouth of a fork is never
+    // what anybody meant.
+    const opening = junctionSide(piece.junction ?? Junction.None);
+    const left = (piece.wallLeft ?? piece.walls ?? false) && opening !== 'left';
+    const right = (piece.wallRight ?? piece.walls ?? false) && opening !== 'right';
+    if (left || right) flags |= PointFlag.Walls;
+    if (!left) flags |= PointFlag.OpenLeft;
+    if (!right) flags |= PointFlag.OpenRight;
     if (piece.gap) flags |= PointFlag.Gap;
 
     for (let s = 0; s < steps; s++) {

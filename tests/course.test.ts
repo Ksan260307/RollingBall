@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  Junction,
   PointFlag,
   Surface,
   buildCourse,
@@ -174,5 +175,100 @@ describe('finding the ball on the course', () => {
     const back = placeOnCourse(flat, spot.x, spot.y, spot.z, 0);
     expect(toNumber(back.travelled)).toBeCloseTo(6, 0);
     expect(toNumber(back.sideways)).toBeCloseTo(1, 1);
+  });
+});
+
+/**
+ * The pieces that make a road divide, and make it come back together.
+ *
+ * A junction is written down as a piece like any other, saying which side
+ * the other road is on. Everything downstream — what gets a wall built
+ * along it, what the ball can bounce off — reads that one fact.
+ */
+describe('where one road becomes two', () => {
+  it('leaves the wall off on the side the other road is on', () => {
+    const split = buildCourse([
+      { length: 20, drop: 6, width: 10, walls: true },
+      { length: 20, drop: 6, width: 10, walls: true, junction: Junction.SplitLeft },
+      { length: 20, drop: 6, width: 10, walls: true },
+    ]);
+    let opened = 0;
+    let plain = 0;
+    // The very last point of a chain sits past the end of the last piece
+    // and carries nothing, so it is left out of this.
+    for (let i = 0; i < split.count - 1; i++) {
+      // Walls are still asked for everywhere: a junction opens one edge, it
+      // does not turn the railings off.
+      expect(split.flags[i] & PointFlag.Walls).not.toBe(0);
+      expect(split.flags[i] & PointFlag.OpenRight).toBe(0);
+      if ((split.flags[i] & PointFlag.OpenLeft) !== 0) opened++;
+      else plain++;
+    }
+    expect(opened).toBeGreaterThan(5);
+    expect(plain).toBeGreaterThan(opened);
+  });
+
+  it('opens the other edge for a junction the other way round', () => {
+    const split = buildCourse([
+      { length: 20, drop: 6, width: 10, walls: true, junction: Junction.JoinRight },
+    ]);
+    let opened = 0;
+    for (let i = 0; i < split.count; i++) {
+      expect(split.flags[i] & PointFlag.OpenLeft).toBe(0);
+      if ((split.flags[i] & PointFlag.OpenRight) !== 0) opened++;
+    }
+    expect(opened).toBeGreaterThan(5);
+  });
+
+  it('leaves an ordinary piece walled on both sides', () => {
+    for (let i = 0; i < sloped.count; i++) {
+      expect(sloped.flags[i] & PointFlag.OpenLeft).toBe(0);
+      expect(sloped.flags[i] & PointFlag.OpenRight).toBe(0);
+    }
+  });
+});
+
+/**
+ * Railings asked for one edge at a time.
+ *
+ * The two edges of a stretch do not always want the same thing. The outside
+ * of a bend is what holds the ball on and has to be there; the edge a
+ * second road joins along has to not be, or the fork is fenced off.
+ */
+describe('railings on one edge at a time', () => {
+  const edges = (piece: Parameters<typeof buildCourse>[0][number]) => {
+    const course = buildCourse([piece]);
+    let left = 0;
+    let right = 0;
+    for (let i = 0; i < course.count - 1; i++) {
+      if ((course.flags[i] & PointFlag.Walls) === 0) continue;
+      if ((course.flags[i] & PointFlag.OpenLeft) === 0) left++;
+      if ((course.flags[i] & PointFlag.OpenRight) === 0) right++;
+    }
+    return { left, right };
+  };
+
+  it('puts one on each edge when the whole stretch asks for them', () => {
+    const both = edges({ length: 20, drop: 6, width: 8, walls: true });
+    expect(both.left).toBeGreaterThan(5);
+    expect(both.right).toBe(both.left);
+  });
+
+  it('puts one on the left alone when only the left asks', () => {
+    const left = edges({ length: 20, drop: 6, width: 8, wallLeft: true });
+    expect(left.left).toBeGreaterThan(5);
+    expect(left.right).toBe(0);
+  });
+
+  it('puts one on the right alone when only the right asks', () => {
+    const right = edges({ length: 20, drop: 6, width: 8, wallRight: true });
+    expect(right.right).toBeGreaterThan(5);
+    expect(right.left).toBe(0);
+  });
+
+  it('lets one edge overrule what the whole stretch said', () => {
+    const held = edges({ length: 20, drop: 6, width: 8, walls: true, wallLeft: false });
+    expect(held.left).toBe(0);
+    expect(held.right).toBeGreaterThan(5);
   });
 });

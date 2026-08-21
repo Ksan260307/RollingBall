@@ -12,7 +12,15 @@
  * missing field or a silly number still loads, with sensible values filled in.
  */
 
-import { CoursePiece, Surface, SurfaceValue, buildCourse, type Course } from '../core/course';
+import {
+  CoursePiece,
+  Junction,
+  type JunctionValue,
+  Surface,
+  SurfaceValue,
+  buildCourse,
+  type Course,
+} from '../core/course';
 import { ONE } from '../core/fixed';
 import courseData from './courses.json';
 import { dailyCourse } from './daily';
@@ -36,9 +44,11 @@ export interface Stage {
    *
    * Inside the fork and the join, because for a few metres either side of a
    * junction the two roads share floor and drawing both puts one across the
-   * other. See branchShows.
+   * other. Railings come in further still: a floor inside another floor is
+   * merely hidden, but a railing inside another road is a fence down the
+   * middle of it. See branchShows.
    */
-  shows?: { from: number; to: number };
+  shows?: { from: number; to: number; railsFrom: number; railsTo: number };
   id: string;
   name: string;
   blurb: string;
@@ -104,10 +114,60 @@ export interface StoredPiece {
   width?: number;
   bank?: number;
   surface?: SurfaceName;
-  walls?: boolean;
+  /**
+   * Which edges have railings.
+   *
+   * True for both and false for neither, as it always was; 'left' or
+   * 'right' for one of them, where the two edges want different things —
+   * the outside of a bend held while the inside is left open for a road
+   * that joins it.
+   */
+  walls?: WallsName;
   gap?: boolean;
   wind?: number;
+  junction?: JunctionName;
 }
+
+/** How a stretch's railings are written down. */
+export type WallsName = boolean | 'left' | 'right';
+
+export const WALLS_NAMES: WallsName[] = [true, 'left', 'right', false];
+
+/** Which edges a written-down setting actually asks for. */
+export function wallsMeaning(walls: WallsName | undefined): {
+  left: boolean;
+  right: boolean;
+} {
+  if (walls === 'left') return { left: true, right: false };
+  if (walls === 'right') return { left: false, right: true };
+  return { left: walls === true, right: walls === true };
+}
+
+/**
+ * Junction pieces, named rather than numbered so the file stays readable.
+ *
+ * 'split-left' means the road divides here and the other way goes off to
+ * the left; the two ways carry the mirrored pair, so where the main line
+ * has 'split-left' the branch has 'split-right' and they open towards each
+ * other. 'join-*' is the same thing at the far end, where they come back.
+ */
+export type JunctionName = 'none' | 'split-left' | 'split-right' | 'join-left' | 'join-right';
+
+export const JUNCTION_NAMES: JunctionName[] = [
+  'none',
+  'split-left',
+  'split-right',
+  'join-left',
+  'join-right',
+];
+
+const JUNCTION_BY_NAME: Record<JunctionName, JunctionValue> = {
+  none: Junction.None,
+  'split-left': Junction.SplitLeft,
+  'split-right': Junction.SplitRight,
+  'join-left': Junction.JoinLeft,
+  'join-right': Junction.JoinRight,
+};
 
 /** Floor materials, named rather than numbered so the file stays readable. */
 export type SurfaceName = 'normal' | 'slick' | 'rough' | 'boost';
@@ -164,6 +224,12 @@ export function pieceFromStored(stored: StoredPiece): CoursePiece {
   const name = (SURFACE_NAMES as string[]).includes(stored.surface ?? '')
     ? (stored.surface as SurfaceName)
     : 'normal';
+  const kind = (JUNCTION_NAMES as string[]).includes(stored.junction ?? '')
+    ? (stored.junction as JunctionName)
+    : 'none';
+  const railings = wallsMeaning(
+    stored.walls === 'left' || stored.walls === 'right' ? stored.walls : stored.walls === true,
+  );
   return {
     length: number(stored.length, COURSE_DEFAULTS.piece.length, 1, 200),
     turn: number(stored.turn, 0, -180, 180),
@@ -171,8 +237,11 @@ export function pieceFromStored(stored: StoredPiece): CoursePiece {
     width: number(stored.width, COURSE_DEFAULTS.piece.width, 2, 100),
     bank: number(stored.bank, 0, -45, 45),
     surface: SURFACE_BY_NAME[name],
-    walls: stored.walls === true,
+    walls: railings.left && railings.right,
+    wallLeft: railings.left,
+    wallRight: railings.right,
     gap: stored.gap === true,
+    junction: JUNCTION_BY_NAME[kind],
     // Nothing said means fully exposed, which is how every course behaved
     // before there was any choice about it.
     wind: number(stored.wind, 1, 0, 1),
@@ -280,7 +349,7 @@ export function branchGap(pieces: CoursePiece[], branch: CoursePiece[], from: nu
  * A metre or so of slack is invisible once the floor has width, and asking
  * for better than that by hand would make a fork impossible to write.
  */
-export const BRANCH_TOLERANCE = { apart: 1.5, height: 1.5, facing: 8, clearance: 0.5 };
+export const BRANCH_TOLERANCE = { apart: 1.5, height: 1.5, facing: 8, spread: 6 };
 
 /**
  * How far from a junction the two ways are allowed to be on top of each other.
@@ -306,12 +375,12 @@ const JUNCTION = 14;
 const HEADROOM = 2.5;
 
 /**
- * How many points past standing clear the second road is still drawn.
+ * How close in height two floors have to be for one to hide the other.
  *
- * Points are laid every couple of metres, so this is a handful of metres of
- * deliberate overlap at each junction — enough that the two roads touch.
+ * Above this they are a bridge rather than a covering, and the lower road
+ * is drawn whatever is over the top of it.
  */
-const INTO_THE_JUNCTION = 2;
+const SAME_HEIGHT = 1.5;
 
 /**
  * How much daylight there is between the two ways down, at their closest.
@@ -358,61 +427,76 @@ export function branchClearance(
 /**
  * Which stretch of the other way down is worth drawing.
  *
- * Two roads that split cannot help sharing floor right at the junction:
- * they leave the same point, and however hard they turn away from each
- * other it takes a few metres before their floors are in different places.
- * Drawn as they are, that shows up as a slab of one road lying across the
- * other — which is precisely what a fork should not look like.
+ * Two roads that divide leave the same point, so for the first few metres
+ * the narrower of them lies entirely inside the wider one. Drawing it there
+ * paints a tongue of the second road's floor across the middle of the first.
+ * Stopping short of it instead leaves a hole where the two ought to meet.
  *
- * So the second way is drawn only from where it has genuinely got clear,
- * to where it starts closing in again. What is left at either end is the
- * main road's own floor, wide and unbroken, with the other way peeling off
- * it. That is what a fork looks like from above a real one.
+ * Neither. The other way is drawn from exactly where it starts to stick out
+ * of the road it is leaving — before that the main floor covers the ground
+ * anyway, so nothing is missing — and from there on it is drawn in front,
+ * which settles the sliver of shared floor at the crotch of the Y.
  */
 export function branchShows(
   pieces: CoursePiece[],
   branch: CoursePiece[],
   from: number,
   to: number,
-): { from: number; to: number } {
+): { from: number; to: number; railsFrom: number; railsTo: number } | null {
   const main = buildCourse(pieces, 0);
   const alt = buildCourse([...pieces.slice(0, from), ...branch, ...pieces.slice(to)], 0);
   const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
   const altTo = forkAt + branch.reduce((sum, piece) => sum + piece.length, 0);
 
-  /** Whether the other way, at this point, is standing clear of the main. */
-  const standsClear = (j: number): boolean => {
+  /** Whether every part of the other way, here, is already floored by the main. */
+  const coveredOver = (j: number): boolean => {
     for (let i = 0; i < main.count; i++) {
+      // Only floor at the same height counts as covering: a road twenty
+      // metres below another one is not hidden by it, it is under it.
+      if (Math.abs((alt.y[j] - main.y[i]) / ONE) > SAME_HEIGHT) continue;
       const dx = (alt.x[j] - main.x[i]) / ONE;
       const dz = (alt.z[j] - main.z[i]) / ONE;
-      const dy = (alt.y[j] - main.y[i]) / ONE;
-      const flat =
-        Math.sqrt(dx * dx + dz * dz) - (alt.halfWidth[j] + main.halfWidth[i]) / ONE;
-      if (Math.max(flat, Math.abs(dy) - HEADROOM) < 0) return false;
+      const reach = (main.halfWidth[i] - alt.halfWidth[j]) / ONE;
+      if (Math.sqrt(dx * dx + dz * dz) <= reach) return true;
+    }
+    return false;
+  };
+
+  /** Whether the other way, here, is entirely off the main road's floor. */
+  const standsAlone = (j: number): boolean => {
+    for (let i = 0; i < main.count; i++) {
+      if (Math.abs((alt.y[j] - main.y[i]) / ONE) > SAME_HEIGHT) continue;
+      const dx = (alt.x[j] - main.x[i]) / ONE;
+      const dz = (alt.z[j] - main.z[i]) / ONE;
+      const touching = (main.halfWidth[i] + alt.halfWidth[j]) / ONE;
+      if (Math.sqrt(dx * dx + dz * dz) < touching) return false;
     }
     return true;
   };
 
   let first = -1;
   let last = -1;
+  let railsFirst = -1;
+  let railsLast = -1;
   for (let j = 0; j < alt.count; j++) {
     const along = alt.distance[j] / ONE;
     if (along < forkAt || along > altTo) continue;
-    if (!standsClear(j)) continue;
+    if (standsAlone(j)) {
+      if (railsFirst < 0) railsFirst = j;
+      railsLast = j;
+    }
+    if (coveredOver(j)) continue;
     if (first < 0) first = j;
     last = j;
   }
-  // Nothing stands clear anywhere: draw the lot and let it look how it looks,
-  // rather than quietly drawing nothing at all.
-  if (first < 0) return { from: forkAt, to: altTo };
-
-  // Carried a little further in at each end than strictly stands clear, so
-  // that the second road runs up to the first rather than starting in
-  // mid-air a stride away from it. What that costs is a sliver of shared
-  // floor at the very tip of the split, which is what the tip of a split is.
-  const back = Math.max(0, first - INTO_THE_JUNCTION);
-  const on = Math.min(alt.count - 1, last + INTO_THE_JUNCTION);
-  return { from: alt.distance[back] / ONE, to: alt.distance[on] / ONE };
+  // Never once out in the open: this is not a second way down, it is the
+  // first one with a second name. Nothing to draw, and nothing to offer.
+  if (first < 0) return null;
+  // Railings nowhere clear of the other road: better none of them than a
+  // fence down the middle of somebody else's way down.
+  const railsFrom = railsFirst < 0 ? Number.POSITIVE_INFINITY : alt.distance[railsFirst] / ONE;
+  const railsTo = railsLast < 0 ? Number.NEGATIVE_INFINITY : alt.distance[railsLast] / ONE;
+  return { from: alt.distance[first] / ONE, to: alt.distance[last] / ONE, railsFrom, railsTo };
 }
 
 /**
@@ -472,7 +556,12 @@ export function branchCloses(gap: BranchGap): boolean {
 function branchOf(
   stored: StoredCourse,
   pieces: CoursePiece[],
-): { altPieces?: CoursePiece[]; forkAt?: number; rejoinAt?: number; shows?: { from: number; to: number } } {
+): {
+  altPieces?: CoursePiece[];
+  forkAt?: number;
+  rejoinAt?: number;
+  shows?: Stage['shows'];
+} {
   const branch = stored.branch;
   if (!branch || !Array.isArray(branch.pieces) || branch.pieces.length === 0) return {};
   const from = Math.round(number(branch.from, -1, 0, pieces.length));
@@ -486,18 +575,20 @@ function branchOf(
   // course plays as though it had never been written.
   if (!branchCloses(branchGap(pieces, detour, from, to))) return {};
 
-  // Nor is a branch that runs through the middle of the road it left. It
-  // closes, and it is drivable, and on screen it is invisible — one floor
-  // inside the other. Dropped for the same reason as one that never comes
-  // back: a fork you cannot see is not a fork.
-  if (branchClearance(pieces, detour, from, to) < BRANCH_TOLERANCE.clearance) return {};
+  // Nor is one that never comes out from under the road it left. It closes,
+  // and it is drivable, and on screen there is one road — the second is
+  // inside the first the whole way down. Dropped for the same reason as one
+  // that never comes back: a fork you cannot see is not a fork.
+  const shows = branchShows(pieces, detour, from, to);
+  if (!shows) return {};
+  if (branchSpread(pieces, detour, from, to) < BRANCH_TOLERANCE.spread) return {};
 
   const altPieces = [...pieces.slice(0, from), ...detour, ...pieces.slice(to)];
   // The choice is made where the two ways part company, and taken back
   // where they meet again. Between those two is all either way has to draw.
   const forkAt = pieces.slice(0, from).reduce((sum, piece) => sum + piece.length, 0);
   const rejoinAt = forkAt + detour.reduce((sum, piece) => sum + piece.length, 0);
-  return { altPieces, forkAt, rejoinAt, shows: branchShows(pieces, detour, from, to) };
+  return { altPieces, forkAt, rejoinAt, shows };
 }
 
 /** Every course in the file, ready to play. */

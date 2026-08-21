@@ -482,7 +482,7 @@
   {
    "id": "fork",
    "name": "ふたまたの谷",
-   "blurb": "道が 大きく 左右に わかれます。ひだりは つるつるで 速い、みぎは しっかり 掴める 道。",
+   "blurb": "道が 大きく 左右に わかれます。ひだりは つるつる、みぎは しっかり 掴める 道。",
    "difficulty": 3,
    "inGame": true,
    "mood": {
@@ -495,7 +495,7 @@
    },
    "breeze": 0,
    "seed": 5150422,
-   "targetSeconds": 21,
+   "targetSeconds": 23,
    "pieces": [
     {
      "length": 12,
@@ -506,63 +506,78 @@
     {
      "length": 12,
      "drop": 8,
-     "width": 10,
+     "width": 12,
      "walls": true
     },
     {
-     "length": 12,
-     "turn": 86,
+     "length": 16,
+     "turn": 20,
      "drop": 7,
-     "width": 6,
+     "width": 12,
+     "walls": true
+    },
+    {
+     "length": 11,
+     "turn": 50,
+     "drop": 7,
+     "width": 10,
      "walls": true,
      "bank": 12
     },
     {
-     "length": 12,
+     "length": 11,
      "turn": 0,
      "drop": 7,
      "width": 10,
      "walls": true
     },
     {
-     "length": 12,
-     "turn": -86,
+     "length": 11,
+     "turn": -70,
      "drop": 7,
      "width": 10,
      "walls": true,
      "bank": -12
     },
     {
-     "length": 12,
-     "turn": -86,
+     "length": 11,
+     "turn": -70,
      "drop": 7,
      "width": 10,
      "walls": true,
      "bank": -12
     },
     {
-     "length": 12,
+     "length": 11,
      "turn": 0,
      "drop": 7,
      "width": 10,
      "walls": true
     },
     {
-     "length": 12,
-     "turn": 86,
+     "length": 11,
+     "turn": 50,
      "drop": 7,
-     "width": 8,
+     "width": 10,
      "walls": true,
      "bank": 12
     },
     {
-     "length": 14,
+     "length": 16,
+     "turn": 20,
+     "drop": 7,
+     "width": 12,
+     "walls": true,
+     "junction": "join-right"
+    },
+    {
+     "length": 12,
      "drop": 8,
      "width": 10,
      "walls": true
     },
     {
-     "length": 14,
+     "length": 12,
      "drop": 8,
      "width": 10,
      "walls": true
@@ -570,19 +585,27 @@
    ],
    "branch": {
     "from": 2,
-    "to": 8,
+    "to": 10,
     "pieces": [
      {
-      "length": 12,
-      "turn": -86,
+      "length": 16,
+      "turn": -20,
       "drop": 7,
-      "width": 6,
+      "width": 8,
+      "walls": true,
+      "surface": "slick"
+     },
+     {
+      "length": 11,
+      "turn": -50,
+      "drop": 7,
+      "width": 8,
       "walls": true,
       "surface": "slick",
       "bank": -12
      },
      {
-      "length": 12,
+      "length": 11,
       "turn": 0,
       "drop": 7,
       "width": 8,
@@ -590,8 +613,8 @@
       "surface": "slick"
      },
      {
-      "length": 12,
-      "turn": 86,
+      "length": 11,
+      "turn": 70,
       "drop": 7,
       "width": 8,
       "walls": true,
@@ -599,8 +622,8 @@
       "bank": 12
      },
      {
-      "length": 12,
-      "turn": 86,
+      "length": 11,
+      "turn": 70,
       "drop": 7,
       "width": 8,
       "walls": true,
@@ -608,7 +631,7 @@
       "bank": 12
      },
      {
-      "length": 12,
+      "length": 11,
       "turn": 0,
       "drop": 7,
       "width": 8,
@@ -616,13 +639,21 @@
       "surface": "slick"
      },
      {
-      "length": 12,
-      "turn": -86,
+      "length": 11,
+      "turn": -50,
       "drop": 7,
-      "width": 6,
+      "width": 8,
       "walls": true,
       "surface": "slick",
       "bank": -12
+     },
+     {
+      "length": 16,
+      "turn": -20,
+      "drop": 7,
+      "width": 8,
+      "walls": true,
+      "surface": "slick"
      }
     ]
    }

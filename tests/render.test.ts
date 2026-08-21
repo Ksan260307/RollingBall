@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { BufferGeometry, Group, Mesh } from 'three';
-import { buildCourse } from '../src/core/course';
+import { Junction, buildCourse } from '../src/core/course';
 import {
   SHAPE_CELLS,
   SHAPE_SIZE,
@@ -327,10 +327,7 @@ describe('drawing the second way down', () => {
     expect(other).not.toBeNull();
 
     const whole = buildCourseMesh(other!, colours);
-    const part = buildCourseMesh(other!, colours, {
-      from: stage.forkAt ?? 0,
-      to: stage.rejoinAt ?? 0,
-    });
+    const part = buildCourseMesh(other!, colours, stage.shows);
     expect(countTriangles(part)).toBeLessThan(countTriangles(whole) * 0.6);
     expect(countTriangles(part)).toBeGreaterThan(0);
     disposeCourseMesh(whole);
@@ -368,5 +365,36 @@ describe('drawing the second way down', () => {
       }
     });
     disposeCourseMesh(part);
+  });
+});
+
+describe('drawing a junction', () => {
+  it('builds no railing along the side the other road is on', () => {
+    const plain = buildCourse([{ length: 40, drop: 6, width: 10, walls: true }]);
+    const open = buildCourse([
+      { length: 40, drop: 6, width: 10, walls: true, junction: Junction.SplitLeft },
+    ]);
+    const plainGroup = buildCourseMesh(plain, colours);
+    const openGroup = buildCourseMesh(open, colours);
+    // Everything else is the same shape, so the difference is one railing:
+    // roughly half of them, and certainly not all and not none.
+    expect(countTriangles(openGroup)).toBeLessThan(countTriangles(plainGroup));
+    expect(countTriangles(openGroup)).toBeGreaterThan(countTriangles(plainGroup) * 0.7);
+    disposeCourseMesh(plainGroup);
+    disposeCourseMesh(openGroup);
+  });
+
+  it('builds no railing at all where both sides are junctions', () => {
+    const bare = buildCourse([{ length: 40, drop: 6, width: 10, walls: false }]);
+    const both = buildCourse([
+      { length: 40, drop: 6, width: 10, walls: true, junction: Junction.SplitLeft },
+    ]);
+    // Opening one side leaves the other, so this only checks the one that
+    // is opened really is gone rather than merely thinner.
+    const bareGroup = buildCourseMesh(bare, colours);
+    const bothGroup = buildCourseMesh(both, colours);
+    expect(countTriangles(bothGroup)).toBeGreaterThan(countTriangles(bareGroup));
+    disposeCourseMesh(bareGroup);
+    disposeCourseMesh(bothGroup);
   });
 });

@@ -363,9 +363,10 @@ export class GameView {
       this.altMesh = null;
     }
     if (alt) {
-      // Trimmed at both ends as well, because for a few metres either side
-      // of a junction the two roads share floor, and drawing both there
-      // lays a slab of one across the other.
+      // From where it comes out of the road it is leaving to where it goes
+      // back into it, and drawn in front for the sliver of shared floor at
+      // either end. See branchShows: stopping short of the junctions leaves
+      // a hole, and starting at them paints one road across the other.
       const forkAt = stage.shows?.from ?? stage.forkAt ?? 0;
       const rejoinAt = stage.shows?.to ?? stage.rejoinAt ?? alt.totalLength / ONE;
       this.altMesh = buildCourseMesh(
@@ -375,7 +376,13 @@ export class GameView {
           edge: stage.mood.edge,
           ground: stage.mood.ground,
         },
-        { from: forkAt, to: rejoinAt },
+        {
+          from: forkAt,
+          to: rejoinAt,
+          inFront: true,
+          railsFrom: stage.shows?.railsFrom,
+          railsTo: stage.shows?.railsTo,
+        },
       );
       this.scene.add(this.altMesh);
     }

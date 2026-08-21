@@ -119,6 +119,28 @@ export interface CourseStretch {
   from: number;
   /** Where to stop, in metres along the course. */
   to: number;
+  /**
+   * Drawn in front of anything else that is in the same place.
+   *
+   * Two roads that meet at a junction share floor for the few metres it
+   * takes them to get apart — they leave the same point, so they must. Left
+   * to themselves the two floors fight over which is nearer the eye and the
+   * junction tears itself to pieces as the camera moves. Saying which one
+   * wins settles it, and settles it the same way from every angle.
+   */
+  inFront?: boolean;
+  /**
+   * Where this stretch's railings may be built, if not the whole of it.
+   *
+   * A floor may lie inside another floor and be none the worse for it —
+   * one simply hides the other. A railing may not. It stands up out of the
+   * ground, so a railing built where two roads overlap is a fence running
+   * down the middle of the other road, which is what a fork must never look
+   * like. So the road is drawn from where it starts to show and its
+   * railings only from where it is out on its own.
+   */
+  railsFrom?: number;
+  railsTo?: number;
 }
 
 /**
@@ -167,6 +189,10 @@ export function buildCourseMesh(
     }
     const missing = (course.flags[i] & PointFlag.Gap) !== 0;
     const hasWalls = (course.flags[i] & PointFlag.Walls) !== 0;
+    // At a junction the wall is left off on the side the other road is on,
+    // so the way in is a way in rather than a railing.
+    const openLeft = (course.flags[i] & PointFlag.OpenLeft) !== 0;
+    const openRight = (course.flags[i] & PointFlag.OpenRight) !== 0;
     const striped = (i & 1) === 0;
 
     const cx = toMetres(course.x[i]);
@@ -217,8 +243,13 @@ export function buildCourseMesh(
     previousEdgeLeft = [el, elo];
     previousEdgeRight = [er, ero];
 
-    // Low walls, where the course has them.
-    if (hasWalls) {
+    const along = toMetres(course.distance[i]);
+    const railsHere =
+      (only?.railsFrom === undefined || along >= only.railsFrom) &&
+      (only?.railsTo === undefined || along <= only.railsTo);
+
+    // Low walls, where the course has them and nothing else is there.
+    if (hasWalls && railsHere && !(openLeft && openRight)) {
       const topLeftX = outerLeftX + ux * WALL_HEIGHT;
       const topLeftY = outerLeftY + uy * WALL_HEIGHT;
       const topLeftZ = outerLeftZ + uz * WALL_HEIGHT;
@@ -230,8 +261,8 @@ export function buildCourseMesh(
       const wr = pushVertex(walls, outerRightX, outerRightY, outerRightZ, -rx, -ry, -rz, edgeColour);
       const wrt = pushVertex(walls, topRightX, topRightY, topRightZ, -rx, -ry, -rz, tint);
       if (previousWall && !missing) {
-        pushQuad(walls, previousWall[0], previousWall[1], wlt, wl);
-        pushQuad(walls, previousWall[3], previousWall[2], wr, wrt);
+        if (!openLeft) pushQuad(walls, previousWall[0], previousWall[1], wlt, wl);
+        if (!openRight) pushQuad(walls, previousWall[3], previousWall[2], wr, wrt);
       }
       previousWall = [wl, wlt, wr, wrt];
     } else {
@@ -272,6 +303,17 @@ export function buildCourseMesh(
     roughness: 1,
     side: BackSide,
   });
+
+  if (only?.inFront) {
+    // Nudged towards the eye when the depth is worked out, not in space, so
+    // the floor is exactly where the ball rolls and only the argument over
+    // what is nearer is settled.
+    for (const material of [floorMaterial, edgeMaterial, wallMaterial, skirtMaterial]) {
+      material.polygonOffset = true;
+      material.polygonOffsetFactor = -2;
+      material.polygonOffsetUnits = -2;
+    }
+  }
 
   group.add(new Mesh(finishGeometry(floor), floorMaterial));
   group.add(new Mesh(finishGeometry(edges), edgeMaterial));

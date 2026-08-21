@@ -1150,7 +1150,7 @@ export class World {
     this.y[player] += perStep(this.velocityY[player]);
     this.z[player] += perStep(this.velocityZ[player]);
 
-    this.settleAgainstWalls(player, (where.flags & PointFlag.Walls) !== 0);
+    this.settleAgainstWalls(player, where.flags);
     this.judge(player);
   }
 
@@ -1548,8 +1548,8 @@ export class World {
     }
   }
 
-  private settleAgainstWalls(player: number, hasWalls: boolean): void {
-    if (!hasWalls) return;
+  private settleAgainstWalls(player: number, flags: number): void {
+    if ((flags & PointFlag.Walls) === 0) return;
     const c = this.courseFor(player);
     const after = placeOnCourse(c, this.x[player], this.y[player], this.z[player], this.hint[player]);
     const i = after.point;
@@ -1561,6 +1561,11 @@ export class World {
 
     const overshoot = abs(after.sideways) - limit;
     const direction = sign(after.sideways);
+    // Nothing to bounce off where a junction has left the wall out. What is
+    // drawn and what is felt have to be the same thing: a wall you cannot
+    // see but can hit is worse than either a wall or no wall.
+    if (direction < 0 && (flags & PointFlag.OpenLeft) !== 0) return;
+    if (direction > 0 && (flags & PointFlag.OpenRight) !== 0) return;
     this.x[player] -= mul(c.rightX[i], overshoot * direction);
     this.y[player] -= mul(c.rightY[i], overshoot * direction);
     this.z[player] -= mul(c.rightZ[i], overshoot * direction);

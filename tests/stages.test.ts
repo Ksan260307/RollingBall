@@ -3,7 +3,14 @@ import { ONE, abs, toNumber } from '../src/core/fixed';
 import { Course, PointFlag, placeOnCourse } from '../src/core/course';
 import { cubeShape, defaultShape, measureShape, pebbleShape } from '../src/core/ballShape';
 import { RunState, World } from '../src/core/simulation';
-import { STAGES, courseFor, courseMetres, stageById } from '../src/game/stages';
+import {
+  STAGES,
+  courseFor,
+  courseMetres,
+  pieceFromStored,
+  stageById,
+  wallsMeaning,
+} from '../src/game/stages';
 import { runWithAutopilot } from './helpers/autopilot';
 
 describe('the set of courses', () => {
@@ -191,5 +198,22 @@ describe('every course can actually be finished', () => {
       expect(runs[1].checksum).toBe(runs[0].checksum);
       expect(runs[1].seconds).toBe(runs[0].seconds);
     }
+  });
+});
+
+describe('railings written down one edge at a time', () => {
+  it('reads true, false and the name of a single edge', () => {
+    expect(wallsMeaning(true)).toEqual({ left: true, right: true });
+    expect(wallsMeaning(false)).toEqual({ left: false, right: false });
+    expect(wallsMeaning('left')).toEqual({ left: true, right: false });
+    expect(wallsMeaning('right')).toEqual({ left: false, right: true });
+    // Nothing written down means no railings, as it always did.
+    expect(wallsMeaning(undefined)).toEqual({ left: false, right: false });
+  });
+
+  it('carries that through to the built course', () => {
+    const piece = pieceFromStored({ length: 20, width: 8, walls: 'right' });
+    expect(piece.wallLeft).toBe(false);
+    expect(piece.wallRight).toBe(true);
   });
 });

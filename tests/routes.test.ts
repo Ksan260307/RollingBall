@@ -10,12 +10,14 @@ import { ONE, toNumber } from '../src/core/fixed';
 import { packControls } from '../src/core/input';
 import { defaultShape, measureShape, randomShape } from '../src/core/ballShape';
 import { buildCourse } from '../src/core/course';
+import { Junction, PointFlag } from '../src/core/course';
+import type { Course } from '../src/core/course';
 import { RunState, World, capture, rewind } from '../src/core/simulation';
 import {
   BRANCH_TOLERANCE,
   STAGES,
   altCourseFor,
-  branchClearance,
+  branchShows,
   branchCloses,
   branchGap,
   branchSpread,
@@ -355,11 +357,14 @@ describe('two ways you can actually tell apart', () => {
     // The branch is the middle of the other way: shared start, own stretch,
     // shared finish. It is the own stretch that has to be somewhere else.
     const detour = stage.altPieces.slice(2, stage.altPieces.length - 2);
-    expect(branchClearance(stage.pieces, detour, 2, 8)).toBeGreaterThan(
-      BRANCH_TOLERANCE.clearance,
+    // It comes out from under the road it left, for a good stretch of it.
+    const shown = branchShows(stage.pieces, detour, 2, stage.pieces.length - 2);
+    expect(shown).not.toBeNull();
+    expect(shown!.to - shown!.from).toBeGreaterThan(30);
+    // And gets far enough away to be a choice rather than a wobble.
+    expect(branchSpread(stage.pieces, detour, 2, stage.pieces.length - 2)).toBeGreaterThan(
+      BRANCH_TOLERANCE.spread,
     );
-    // And far enough away to be a choice rather than a wobble.
-    expect(branchSpread(stage.pieces, detour, 2, 8)).toBeGreaterThan(8);
   });
 
   it('sends the two ways round opposite sides of the same ground', () => {
@@ -424,7 +429,7 @@ describe('two ways you can actually tell apart', () => {
     // It does come back to the right place.
     expect(branchCloses(branchGap(pieces, onTop, 2, 4))).toBe(true);
     // And it is still not a fork.
-    expect(branchClearance(pieces, onTop, 2, 4)).toBeLessThan(BRANCH_TOLERANCE.clearance);
+    expect(branchShows(pieces, onTop, 2, 4)).toBeNull();
 
     const stage = stageFromStored(
       {
@@ -453,8 +458,148 @@ describe('two ways you can actually tell apart', () => {
       { length: 16, drop: 4, width: 6, walls: true },
     ];
     expect(branchCloses(branchGap(pieces, underneath, 2, 4))).toBe(true);
-    expect(branchClearance(pieces, underneath, 2, 4)).toBeGreaterThan(
-      BRANCH_TOLERANCE.clearance,
-    );
+    expect(branchShows(pieces, underneath, 2, 4)).not.toBeNull();
+  });
+});
+
+/**
+ * The fork drawn as two junction pieces, and felt as them too.
+ *
+ * The first fork that shipped was fenced off: a railing ran the whole way
+ * along the inside of both roads, so the second way looked like somewhere
+ * you were being kept out of, and the place the two came back together was
+ * two cut ends near each other rather than a join. A junction piece is what
+ * says "the other road is on this side", and everything else follows.
+ */
+describe('the pieces that make a road divide', () => {
+  it('leaves no railing standing across either way in or either way out', () => {
+    const stage = stageById('fork');
+    if (!stage?.altPieces || !stage.shows) throw new Error('the fork course lost its branch');
+    const main = courseFor(stage);
+    const other = altCourseFor(stage)!;
+
+    /**
+     * Every railing the player can actually see, as a line on the ground.
+     *
+     * Only the drawn ones: the second way is held back from both junctions,
+     * and its railings further still, so the ones inside the first road are
+     * not there to be run into or looked at.
+     */
+    const railings = (
+      c: Course,
+      fromM = Number.NEGATIVE_INFINITY,
+      toM = Number.POSITIVE_INFINITY,
+    ): number[][][] => {
+      const out: number[][][] = [];
+      for (let i = 1; i < c.count; i++) {
+        const along = c.distance[i] / ONE;
+        if (along < fromM || along > toM) continue;
+        if ((c.flags[i] & PointFlag.Walls) === 0) continue;
+        for (const side of [-1, 1]) {
+          const open = side < 0 ? PointFlag.OpenLeft : PointFlag.OpenRight;
+          if ((c.flags[i] & open) !== 0) continue;
+          const edge = (k: number): number[] => [
+            (c.x[k] + side * ((c.rightX[k] * c.halfWidth[k]) / ONE)) / ONE,
+            (c.z[k] + side * ((c.rightZ[k] * c.halfWidth[k]) / ONE)) / ONE,
+          ];
+          out.push([edge(i - 1), edge(i)]);
+        }
+      }
+      return out;
+    };
+
+    const crosses = (p: number[], q: number[], a: number[], b: number[]): boolean => {
+      const turn = (o: number[], u: number[], v: number[]): number =>
+        (u[0] - o[0]) * (v[1] - o[1]) - (u[1] - o[1]) * (v[0] - o[0]);
+      return (
+        turn(p, q, a) * turn(p, q, b) < 0 && turn(a, b, p) * turn(a, b, q) < 0
+      );
+    };
+
+    const spot = (c: Course, metres: number): number[] => {
+      let at = 0;
+      for (let i = 0; i < c.count; i++) {
+        if (
+          Math.abs(c.distance[i] / ONE - metres) < Math.abs(c.distance[at] / ONE - metres)
+        ) {
+          at = i;
+        }
+      }
+      return [c.x[at] / ONE, c.z[at] / ONE];
+    };
+
+    const bars = [
+      ...railings(main),
+      ...railings(other, stage.shows.railsFrom, stage.shows.railsTo),
+    ];
+    const fork = stage.forkAt ?? 0;
+    const join = stage.rejoinAt ?? 0;
+    const ways: [string, number[], number[]][] = [
+      ['into the other way', spot(main, fork - 4), spot(other, fork + 16)],
+      ['staying on the main line', spot(main, fork - 4), spot(main, fork + 16)],
+      ['the other way coming back', spot(other, join - 16), spot(main, join + 6)],
+      ['the main line coming back', spot(main, join - 16), spot(main, join + 6)],
+    ];
+    for (const [what, from, to] of ways) {
+      const across = bars.filter((bar) => crosses(from, to, bar[0], bar[1]));
+      expect(`${what}: ${across.length} railings across`).toBe(`${what}: 0 railings across`);
+    }
+  });
+
+  it('lets the ball through where the wall is not drawn', () => {
+    // A wall you cannot see but can hit is the worst of both. Held hard
+    // against the left edge of the same stretch twice — once walled, once
+    // with a junction opening that edge — and the two must not agree.
+    const roll = (junction: number | undefined): { falls: number; held: number } => {
+      const world = new World({
+        course: buildCourse(
+          [{ length: 60, drop: 4, width: 8, walls: true, junction: junction as never }],
+          0,
+        ),
+        seed: 1,
+        ball: measureShape(defaultShape()),
+        countdownSeconds: 0,
+      });
+      let falls = 0;
+      let was = 0;
+      let held = 0;
+      for (let i = 0; i < 120 * 8; i++) {
+        world.advance([packControls({ steer: -ONE, push: ONE, buttons: 0 })]);
+        const now = toNumber(world.travelled[0]);
+        // Put back at the start is the only way to go backwards.
+        if (now < was - 5) falls++;
+        was = now;
+        held = Math.max(held, -toNumber(world.sideways[0]));
+      }
+      return { falls, held };
+    };
+    const walled = roll(undefined);
+    const opened = roll(Junction.SplitLeft);
+
+    // Walled: held on, never off.
+    expect(walled.falls).toBe(0);
+    expect(walled.held).toBeLessThan(4.1);
+    // Opened: nothing there to hold it, so off it goes.
+    expect(opened.falls).toBeGreaterThan(0);
+  });
+
+  it('keeps the wall on the side the junction does not open', () => {
+    const roll = (steer: number): number => {
+      const world = new World({
+        course: buildCourse(
+          [{ length: 40, drop: 4, width: 8, walls: true, junction: Junction.SplitLeft }],
+          0,
+        ),
+        seed: 1,
+        ball: measureShape(defaultShape()),
+        countdownSeconds: 0,
+      });
+      for (let i = 0; i < 120 * 5; i++) {
+        world.advance([packControls({ steer, push: ONE, buttons: 0 })]);
+      }
+      return toNumber(world.sideways[0]);
+    };
+    // Right is still walled, so the ball is still held on.
+    expect(roll(ONE)).toBeLessThan(4.2);
   });
 });

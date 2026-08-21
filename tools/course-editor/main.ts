@@ -28,21 +28,25 @@ import {
 } from 'three';
 import { type CoursePiece, buildCourse } from '../../src/core/course';
 import {
+  type JunctionName,
   type StoredPiece,
+  type WallsName,
   BRANCH_TOLERANCE,
-  branchClearance,
   branchCloses,
   branchGap,
   branchShows,
+  branchSpread,
 } from '../../src/game/stages';
-import { describeClearance, describeGap, fitBranch } from './fit';
+import { describeGap, fitBranch } from './fit';
 import { toNumber } from '../../src/core/fixed';
 import { defaultShape, measureShape } from '../../src/core/ballShape';
 import { RunState, STEPS_PER_SECOND, World } from '../../src/core/simulation';
 import { demoControls } from '../../src/game/demoDriver';
 import {
   COURSE_DEFAULTS,
+  JUNCTION_NAMES,
   SURFACE_NAMES,
+  wallsMeaning,
   type StoredCourse,
   type SurfaceName,
   pieceFromStored,
@@ -198,9 +202,14 @@ function refreshPreview(): void {
     const to = Math.max(from, Math.min(stage.pieces.length, Math.round(branch.to)));
     const other = buildCourse([...stage.pieces.slice(0, from), ...held, ...stage.pieces.slice(to)], 0);
     // Held back from both junctions the same way the game holds it back, so
-    // that what is drawn here is what will be drawn there.
-    branchMesh = buildCourseMesh(other, paint, branchShows(stage.pieces, held, from, to));
-    scene.add(branchMesh);
+    // that what is drawn here is what will be drawn there. Nothing to draw where the second way never comes out from under the
+    // first: that is the state the author is trying to get out of, and an
+    // empty preview says so more plainly than a road drawn on top of a road.
+    const shows = branchShows(stage.pieces, held, from, to);
+    if (shows) {
+      branchMesh = buildCourseMesh(other, paint, { ...shows, inFront: true });
+      scene.add(branchMesh);
+    }
   }
 
   if (startMarker) {
@@ -314,15 +323,98 @@ function numberField(
 /** Turns a built stretch back into the plain form the file keeps. */
 function storedFromPiece(piece: CoursePiece): StoredPiece {
   const round = (value: number): number => Math.round(value * 100) / 100;
+  const left = piece.wallLeft ?? piece.walls ?? false;
+  const right = piece.wallRight ?? piece.walls ?? false;
   const stored: StoredPiece = {
     length: round(piece.length),
     width: round(piece.width ?? 8),
-    walls: piece.walls === true,
+    walls: left && right ? true : left ? 'left' : right ? 'right' : false,
   };
   if (piece.turn) stored.turn = round(piece.turn);
   if (piece.drop) stored.drop = round(piece.drop);
   if (piece.bank) stored.bank = round(piece.bank);
+  // What the floor is made of and whether this is a junction are the
+  // author's, not the shape's. Dropping them here quietly turned a rough
+  // narrow chute into ordinary road every time the closer was worked out.
+  if (piece.surface) stored.surface = SURFACE_NAMES[piece.surface];
+  if (piece.junction) stored.junction = JUNCTION_NAMES[piece.junction];
   return stored;
+}
+
+/**
+ * The two ticks that say which edges of a stretch have railings.
+ *
+ * Written back as one value — true, false, or the name of the single edge
+ * that has one — so a course file stays as readable as it was.
+ */
+function wallTicks(piece: StoredPiece): HTMLElement[] {
+  const set = (left: boolean, right: boolean): void => {
+    piece.walls = (left && right ? true : left ? 'left' : right ? 'right' : false) as WallsName;
+    refreshPreview();
+  };
+  const has = wallsMeaning(piece.walls);
+  return [
+    checkbox('ひだりの柵', has.left, (on) => set(on, has.right)),
+    checkbox('みぎの柵', has.right, (on) => set(has.left, on)),
+  ];
+}
+
+/** The picker for what the floor is made of. */
+const SURFACE_LABELS: Record<SurfaceName, string> = {
+  normal: 'ふつう',
+  slick: 'すべる',
+  rough: 'あらい',
+  boost: '加速',
+};
+
+function surfaceField(piece: StoredPiece): HTMLSelectElement {
+  const select = el('select', {
+    on: {
+      change: (event) => {
+        piece.surface = (event.target as HTMLSelectElement).value as SurfaceName;
+        refreshPreview();
+      },
+    },
+  }) as HTMLSelectElement;
+  for (const name of SURFACE_NAMES) {
+    const option = el('option', { text: SURFACE_LABELS[name], attrs: { value: name } });
+    if ((piece.surface ?? 'normal') === name) option.setAttribute('selected', 'selected');
+    select.append(option);
+  }
+  return select;
+}
+
+/**
+ * The picker for where a road divides, or comes back together.
+ *
+ * Placing one of these is what stops a railing being built across the mouth
+ * of a fork. They come in pairs: where one way says the other is on its
+ * left, the other says the first is on its right, and the two open towards
+ * each other.
+ */
+const JUNCTION_LABELS: Record<JunctionName, string> = {
+  none: 'ふつうの道',
+  'split-left': 'わかれ（ひだりへ）',
+  'split-right': 'わかれ（みぎへ）',
+  'join-left': 'あわさり（ひだりから）',
+  'join-right': 'あわさり（みぎから）',
+};
+
+function junctionField(piece: StoredPiece): HTMLSelectElement {
+  const select = el('select', {
+    on: {
+      change: (event) => {
+        piece.junction = (event.target as HTMLSelectElement).value as JunctionName;
+        refreshPreview();
+      },
+    },
+  }) as HTMLSelectElement;
+  for (const name of JUNCTION_NAMES) {
+    const option = el('option', { text: JUNCTION_LABELS[name], attrs: { value: name } });
+    if ((piece.junction ?? 'none') === name) option.setAttribute('selected', 'selected');
+    select.append(option);
+  }
+  return select;
 }
 
 function branchPanel(course: StoredCourse): HTMLElement {
@@ -387,6 +479,12 @@ function branchPanel(course: StoredCourse): HTMLElement {
             piece.width = value;
             refreshPreview();
           }),
+          // A fork has two sides and both have to be told about it: the
+          // branch needs its own junction pieces at each end, opening
+          // towards the road it leaves.
+          el('label', {}, el('span', { text: 'わかれ目' }), junctionField(piece)),
+          el('label', {}, el('span', { text: '床' }), surfaceField(piece)),
+          ...wallTicks(piece),
         ),
       );
     });
@@ -395,11 +493,12 @@ function branchPanel(course: StoredCourse): HTMLElement {
     const detour = branch.pieces.map(pieceFromStored);
     const gap = branchGap(built, detour, branch.from, branch.to);
     const closes = branchCloses(gap);
-    // Closing is half of it. A branch that comes back perfectly but runs
-    // through the middle of the road it left is invisible on screen, so how
-    // far the two ways keep away from each other is shown just as plainly.
-    const clearance = branchClearance(built, detour, branch.from, branch.to);
-    const clears = clearance >= BRANCH_TOLERANCE.clearance;
+    // Closing is half of it. A branch that comes back perfectly but never
+    // comes out from under the road it left is invisible on screen, so how
+    // far the two ways get from each other is shown just as plainly.
+    const spread = branchSpread(built, detour, branch.from, branch.to);
+    const shown = branchShows(built, detour, branch.from, branch.to);
+    const clears = shown !== null && spread >= BRANCH_TOLERANCE.spread;
     rows.push(
       el('p', {
         class: closes ? 'note note-good' : 'note note-bad',
@@ -408,8 +507,10 @@ function branchPanel(course: StoredCourse): HTMLElement {
       el('p', {
         class: clears ? 'note note-good' : 'note note-bad',
         text: clears
-          ? `二本の道は 重なっていません： ${describeClearance(clearance)}`
-          : `二本の道が 重なっています（このままでは 本編に出ません）： ${describeClearance(clearance)}。わかれ道を よこに ずらすか、上下に 離してください`,
+          ? `二本の道は 見わけが つきます： いちばん ひらくところ ${spread.toFixed(1)}m` +
+            `（わかれ道が 見えるのは ${(shown!.to - shown!.from).toFixed(0)}m ぶん）`
+          : 'わかれ道が 本線に 隠れています（このままでは 本編に出ません）。' +
+            'わかれ道を よこに ずらすか、上下に 離してください',
       }),
       el(
         'div',
@@ -608,25 +709,9 @@ function renderPieces(): HTMLElement {
       } },
     });
 
-    const surfaceSelect = el('select', {
-      on: {
-        change: (event) => {
-          piece.surface = (event.target as HTMLSelectElement).value as SurfaceName;
-          refreshPreview();
-        },
-      },
-    });
-    const labels: Record<SurfaceName, string> = {
-      normal: 'ふつう',
-      slick: 'すべる',
-      rough: 'あらい',
-      boost: '加速',
-    };
-    for (const name of SURFACE_NAMES) {
-      const option = el('option', { text: labels[name], attrs: { value: name } });
-      if ((piece.surface ?? 'normal') === name) option.setAttribute('selected', 'selected');
-      surfaceSelect.append(option);
-    }
+    const surfaceSelect = surfaceField(piece);
+
+    const junctionSelect = junctionField(piece);
 
     row.append(
       el(
@@ -684,10 +769,10 @@ function renderPieces(): HTMLElement {
         'div',
         { class: 'piece-flags' },
         el('label', {}, el('span', { text: '床' }), surfaceSelect),
-        checkbox('壁', piece.walls === true, (on) => {
-          piece.walls = on;
-          refreshPreview();
-        }),
+        el('label', {}, el('span', { text: 'わかれ目' }), junctionSelect),
+        // One tick per edge. A junction wants the inside open and the
+        // outside held, and a single switch cannot say that.
+        ...wallTicks(piece),
         checkbox('とぎれ', piece.gap === true, (on) => {
           piece.gap = on;
           refreshPreview();
